@@ -102,3 +102,4 @@ If you are not a WarnerMedia employee, please follow the instructions listed in 
 ### Optional
 
 1. Interactive setup shell script which would allow for deployment to multiple accounts and regions.
+2. Testing the CLA with a PR from an internal account.  I should not get the CLA notice.
