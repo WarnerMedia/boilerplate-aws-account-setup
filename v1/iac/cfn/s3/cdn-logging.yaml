@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Set up the S3 bucket for CloudFront/CDN logging - (v1.0.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  # Bucket Configuration
+  BucketObjectExpirationInDays:
+    Type: "Number"
+    Description: "The default age of an object before it is automatically deleted from the bucket."
+    Default: 62
+Resources:
+  CdnLoggingBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      AccessControl: "LogDeliveryWrite"
+      BucketName: !Sub
+      - "${AccountName}-${InfrastructureName}-cdn-logging-${AWS::Region}"
+      - AccountName: "{{resolve:ssm:/account/name}}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: "aws:kms"
+            KMSMasterKeyID: !Sub "{{resolve:ssm:/kms/${InfrastructureName}/key/s3/arn}}"
+      LifecycleConfiguration:
+        Rules:
+        - Id: "DefaultObjectMaxAge"
+          Prefix: ""
+          Status: "Enabled"
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: !Ref BucketObjectExpirationInDays
+          ExpirationInDays: !Ref BucketObjectExpirationInDays
+          NoncurrentVersionExpirationInDays: !Ref BucketObjectExpirationInDays
+      LoggingConfiguration:
+        DestinationBucketName: !Sub "{{resolve:ssm:/s3/${InfrastructureName}/bucket/logging/server-access/name}}"
+        LogFilePrefix: !Sub
+        - "${AccountName}-${InfrastructureName}-load-balancer-logging-${AWS::Region}/"
+        - AccountName: "{{resolve:ssm:/account/name}}"
+      PublicAccessBlockConfiguration:
+        # Block public access to buckets and objects granted through new access control lists (ACLs)
+        BlockPublicAcls: true
+        # Block public access to buckets and objects granted through any access control lists (ACLs)
+        IgnorePublicAcls: true
+        # Block public access to buckets and objects granted through new public bucket or access point policies
+        BlockPublicPolicy: true
+        # Block public and cross-account access to buckets and objects through any public bucket or access point policies
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: "Suspended"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamCdnLoggingBucketName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The CloudFront/CDN logging bucket name."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/logging/cdn/name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref CdnLoggingBucket
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamCdnLoggingBucketArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The CloudFront/CDN logging bucket ARN."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/logging/cdn/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt CdnLoggingBucket.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamCdnLoggingDomainName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The CloudFront/CDN logging bucket domain name."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/logging/cdn/domain-name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt CdnLoggingBucket.DomainName
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  CdnLoggingBucketName:
+    Description: "The bucket name."
+    Value: !Ref CdnLoggingBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-CdnLoggingBucketName"
+  CdnLoggingBucketArn:
+    Description: "The bucket ARN."
+    Value: !GetAtt CdnLoggingBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-CdnLoggingBucketArn"
+  CdnLoggingDomainName:
+    Description: "The bucket domain name."
+    Value: !GetAtt CdnLoggingBucket.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-CdnLoggingDomainName"
+  ParamCdnLoggingBucketName:
+    Description: "The CloudFront/CDN logging bucket name SSM parameter."
+    Value: !Ref ParamCdnLoggingBucketName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamCdnLoggingBucketName"
+  ParamCdnLoggingBucketArn:
+    Description: "The CloudFront/CDN logging bucket ARN SSM parameter."
+    Value: !Ref ParamCdnLoggingBucketArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamCdnLoggingBucketArn"
+  ParamCdnLoggingDomainName:
+    Description: "The CloudFront/CDN logging bucket domain name SSM parameter."
+    Value: !Ref ParamCdnLoggingDomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamCdnLoggingDomainName"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    - Label:
+        default: "Bucket Configuration"
+      Parameters:
+      - BucketObjectExpirationInDays
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      BucketObjectExpirationInDays:
+        default: "Default Object Expiration (In Days):"

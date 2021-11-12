@@ -1,0 +1,970 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create the infrastructure CodePipeline - (v1.1.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  # CodePipeline Configuration
+  CloudFormationCapabilities:
+    Type: "String"
+    Description: "A list of the capabilities that CloudFormation should have when executing stacks via CodePipeline."
+    Default: "CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND"
+  AppBaseFolder:
+    Type: "String"
+    Description: "The base repository folder for the application."
+    Default: "v1"
+  ActionMode:
+    Type: "String"
+    Description: "The CodePipeline CloudFormation stack action mode."
+    AllowedValues:
+    - "CHANGE_SET_EXECUTE"
+    - "CHANGE_SET_REPLACE"
+    - "CREATE_UPDATE"
+    - "DELETE_ONLY"
+    - "REPLACE_ON_FAILURE"
+    Default: "REPLACE_ON_FAILURE"
+  ExternalAccountId:
+    Type: "String"
+    Description: "An external account which should have access to certain resources in this account."
+    Default: ""
+  # Manual Approval Configuration
+  EnableManualApproval:
+    Type: "String"
+    Description: "Enable initial manual approval step (used to prevent automatic update of production)."
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "No"
+  ApprovalMessagePrefix:
+    Type: "String"
+    Description: "Message prefix to be displayed in the approval block."
+    Default: "Should the latest infrastructure changes for the"
+  ApprovalEnvironment:
+    Type: "String"
+    Description: "The environment that the Docker image will move to next."
+    Default: ""
+  ApprovalMessageSuffix:
+    Type: "String"
+    Description: "Message prefix to be displayed in the approval block."
+    Default: "environment be deployed?"
+  # Source Configuration
+  SourceObject:
+    Type: "String"
+    Description: "The source object fot the CodePipeline to use."
+  # GitHub Configuration
+  CreateGitHubSourceCredential:
+    Type: "String"
+    Description: "Create GitHub CodeBuild source credential for this region (used by all CodeBuilds for GitHub interactions)?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "Yes"
+  # Domain Configuration
+  CreateDomainNameHostedZone:
+    Type: "String"
+    Description: "Do we need to create a hosted zone in Route53?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "No"
+  HostedZoneDomainName:
+    Type: "String"
+    Description: "What is the primary domain name that we will be using with this infrastructure (e.g. example.com)?"
+  NonProdNameServerDomains:
+    Type: "String"
+    Description: "If you are using a split account and already created a hosted zone in the non-prod account, what are the name servers for the non-prod DNS entries? (e.g. ns-123.awsdns-45.com,ns-1234.awsdns-56.org, etc.)"
+    Default: ""
+  NonProdDomainName:
+    Type: "String"
+    Description: "What is the primary domain name used in the non-prod account (e.g. nonprod.example.com)?"
+    Default: ""
+  # Secure Certificate Configuration
+  CreateSecureCertificate:
+    Type: "String"
+    Description: "Do we need to create a secure certificate to be used with the domain?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "No"
+  SecureCertificatePrimaryDomain:
+    Type: "String"
+    Description: "If a secure certificate needs to be created, what is the primary domain for the certificate?"
+  SecureCertificateAlternateDomainCount:
+    Type: "String"
+    Description: "If we need to cover more than the primary domain, how many domains will be added to the certificate?"
+    AllowedValues:
+    - "0"
+    - "1"
+    - "2"
+    - "3"
+    - "4"
+    - "5"
+    - "6"
+    - "7"
+    Default: "0"
+  SecureCertificateAlternateDomains:
+    Type: "String"
+    Description: "If a secure certificate needs to be created and we need to cover more than the primary domain, what is the comma-separated list of alternate domains?"
+    Default: ""
+  # VPC Configuration
+  RegionUse:
+    Type: "String"
+    Description: "Are we using the current region as the primary (region where global or single-region resources will be managed), secondary (region where we replicate to or set up multi-region resources in), or tertiary (generally speaking, the backup/testing region)?"
+    AllowedValues:
+    - "primary"
+    - "secondary"
+    - "tertiary"
+    Default: "primary"
+  VpnIpv4CidrBlock:
+    Type: "String"
+    Description: "What is the IPv4 CIDR block of the network/VPN that needs access to this VPC (e.g. 203.0.113.0/24)?"
+    Default: ""
+  CreateBastion:
+    Type: "String"
+    Description: "Should a bastion instance be created?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "No"
+  KeyPair:
+    Type: "String"
+    Description: "If we are creating a bastion instance, what EC2 key pair name should be used (must be created in the console: https://us-east-2.console.aws.amazon.com/ec2/v2/home?region=us-east-2#KeyPairs:)?"
+    Default: ""
+  EnableVpcIpv6:
+    Type: "String"
+    Description: "Should IPv6 be enabled for this VPC (some regions don't support it, like any regions in China)?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "Yes"
+Conditions:
+  AppBaseFolder: !Not [ !Equals [ !Ref AppBaseFolder, "" ] ]
+  CreateBastionInstance: !Equals [ !Ref CreateBastion, "Yes" ]
+  CreateDomainNameHostedZone: !Equals [ !Ref CreateDomainNameHostedZone, "Yes" ]
+  CreateGitHubSourceCredential: !Equals [ !Ref CreateGitHubSourceCredential, "Yes" ]
+  CreateSecureCertificate: !Equals [ !Ref CreateSecureCertificate, "Yes" ]
+  EnableManualApproval: !Equals [ !Ref EnableManualApproval, "Yes" ]
+  KeyPair: !Not [ !Equals [ !Ref KeyPair, "" ] ]
+  NonProdNameServerDomains:  !Not [ !Equals [ !Ref NonProdNameServerDomains, "" ] ]
+  NonProdDomainName: !Not [ !Equals [ !Ref NonProdDomainName, "" ] ]
+  SecureCertificateAlternateDomainCount: !Not [ !Equals [ !Ref SecureCertificateAlternateDomainCount, "0" ] ]
+  SubjectAlternativeNames: !Not [ !Equals [ !Ref SecureCertificateAlternateDomains, "" ] ]
+  EnableSubjectAlternativeNames: !And 
+  - !Condition SecureCertificateAlternateDomainCount
+  - !Condition SubjectAlternativeNames
+  NonProdDomainEntry: !And 
+  - !Condition NonProdNameServerDomains
+  - !Condition NonProdDomainName
+Resources:
+  InfrastructureServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "cloudformation.amazonaws.com"
+            - "codepipeline.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      Policies:
+      - PolicyName: "InfrastructureServiceRole"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+            - "iam:AttachRolePolicy"
+            - "iam:CreateRole"
+            - "iam:CreateServiceLinkedRole"
+            - "iam:DeleteRole"
+            - "iam:DeleteRolePermissionsBoundary"
+            - "iam:DeleteRolePolicy"
+            - "iam:DeleteServiceLinkedRole"
+            - "iam:DetachRolePolicy"
+            - "iam:GetRole"
+            - "iam:GetRolePolicy"
+            - "iam:GetServiceLinkedRoleDeletionStatus"
+            - "iam:ListAttachedRolePolicies"
+            - "iam:ListInstanceProfilesForRole"
+            - "iam:ListRolePolicies"
+            - "iam:ListRoleTags"
+            - "iam:PassRole"
+            - "iam:PutRolePermissionsBoundary"
+            - "iam:PutRolePolicy"
+            - "iam:TagRole"
+            - "iam:UntagRole"
+            - "iam:UpdateAssumeRolePolicy"
+            - "iam:UpdateRole"
+            - "iam:UpdateRoleDescription"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+            - "kms:*"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+            - "logs:*"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+            - "ssm:AddTagsToResource"
+            - "ssm:DeleteParameter"
+            - "ssm:DeleteParameters"
+            - "ssm:DescribeDocumentParameters"
+            - "ssm:DescribeParameters"
+            - "ssm:GetParameter"
+            - "ssm:GetParameterHistory"
+            - "ssm:GetParameters"
+            - "ssm:GetParametersByPath"
+            - "ssm:LabelParameterVersion"
+            - "ssm:ListTagsForResource"
+            - "ssm:PutParameter"
+            - "ssm:RemoveTagsFromResource"
+            Resource: "*"
+      ManagedPolicyArns:
+      - "arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+      - "arn:aws:iam::aws:policy/AmazonRoute53FullAccess"
+      - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+      - "arn:aws:iam::aws:policy/AmazonVPCFullAccess"
+      - "arn:aws:iam::aws:policy/AWSCertificateManagerFullAccess"
+      - "arn:aws:iam::aws:policy/AWSCloudFormationFullAccess"
+      - "arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess"
+      - "arn:aws:iam::aws:policy/AWSCodePipeline_FullAccess"
+      - "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+      - "arn:aws:iam::aws:policy/IAMFullAccess"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  InfrastructureCodePipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      RoleArn: !GetAtt InfrastructureServiceRole.Arn
+      Name: !Sub "${InfrastructureName}-infrastructure-setup"
+      RestartExecutionOnUpdate: false
+      ArtifactStores:
+      - Region: !Ref "AWS::Region"
+        ArtifactStore:
+          Type: "S3"
+          Location: !Sub "{{resolve:ssm:/s3/${InfrastructureName}/bucket/setup/name}}"
+      Stages:
+      - Name: "Source"
+        Actions:
+        - Name: "Infrastructure_Source"
+          Namespace: "Infrastructure"
+          ActionTypeId:
+            Category: "Source"
+            Owner: "AWS"
+            Provider: "S3"
+            Version: "1"
+          Configuration:
+            S3Bucket:  !Sub "{{resolve:ssm:/s3/${InfrastructureName}/bucket/setup/name}}"
+            S3ObjectKey: !Ref SourceObject
+            PollForSourceChanges: "true"
+          OutputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          RunOrder: 1
+      - !If
+        - EnableManualApproval
+        - Name: "Manual_Approval"
+          Actions:
+          - Name: "Approval"
+            ActionTypeId:
+              Category: "Approval"
+              Owner: "AWS"
+              Provider: "Manual"
+              Version: "1"
+            Configuration:
+              CustomData: !Sub "${ApprovalMessagePrefix} \"${ApprovalEnvironment}\" ${ApprovalMessageSuffix}"
+            RunOrder: 1
+        - !Ref "AWS::NoValue"
+      - Name: "KMS_Keys"
+        Actions:
+        - Name: "ECS_KMS_Key"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-ecs-kms-key"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/kms/key/generic.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/kms/key/ecs.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "ECS_KMS_KEY_OUTPUT"
+          RunOrder: 1
+          Region: !Ref "AWS::Region"
+        - Name: "Lambda_KMS_Key"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-lambda-kms-key"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/kms/key/generic.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/kms/key/lambda.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "LAMBDA_KMS_KEY_OUTPUT"
+          RunOrder: 1
+          Region: !Ref "AWS::Region"
+        - Name: "S3_KMS_Key"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-s3-kms-key"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/kms/key/s3.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/kms/key/s3.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}",
+                "ExternalAccountId": "${ExternalAccountId}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "S3_KMS_KEY_OUTPUT"
+          RunOrder: 1
+          Region: !Ref "AWS::Region"
+      - Name: "S3_Buckets"
+        Actions:
+        - Name: "Server_Access_Logging"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-s3-server-access-logging-bucket"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/s3/server-access-logging.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/s3/server-access-logging.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "S3_SERVER_ACCESS_LOGGING_OUTPUT"
+          RunOrder: 1
+          Region: !Ref "AWS::Region"
+        - Name: "Load_Balancer_Logging"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-s3-load-balancer-logging-bucket"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/s3/load-balancer-logging.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/s3/load-balancer-logging.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "S3_LOAD_BALANCER_LOGGING_OUTPUT"
+          RunOrder: 2
+          Region: !Ref "AWS::Region"
+        - Name: "CodePipeline"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-s3-codepipeline-bucket"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/s3/codepipeline.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/s3/codepipeline.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "S3_CODEPIPELINE_OUTPUT"
+          RunOrder: 2
+          Region: !Ref "AWS::Region"
+        - Name: "Artifact"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-s3-artifact-bucket"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/s3/artifact.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/s3/artifact.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}",
+                "ExternalAccountId": "${ExternalAccountId}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "S3_ARTIFACT_OUTPUT"
+          RunOrder: 2
+          Region: !Ref "AWS::Region"
+        - Name: "CDN_Logging"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-s3-cdn-bucket"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/s3/cdn-logging.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/s3/cdn-logging.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "S3_CDN_LOGGING_OUTPUT"
+          RunOrder: 2
+          Region: !Ref "AWS::Region"
+      - !If
+        - CreateGitHubSourceCredential
+        - Name: "GitHub_Credentials"
+          Actions:
+          - Name: "CodeBuild_GitHub_Source_Credential"
+            ActionTypeId:
+              Category: "Deploy"
+              Owner: "AWS"
+              Provider: "CloudFormation"
+              Version: "1"
+            Configuration:
+              ActionMode: !Ref ActionMode
+              StackName: !Sub "${InfrastructureName}-codebuild-github-source-credential"
+              Capabilities: !Ref CloudFormationCapabilities
+              TemplatePath:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/codebuild/github-source-credential.yaml"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+              TemplateConfiguration:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/codebuild/github-source-credential.json"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+              RoleArn: !GetAtt InfrastructureServiceRole.Arn
+              OutputFileName: "out.json"
+              ParameterOverrides: !Sub |
+                {
+                  "InfrastructureName": "${InfrastructureName}"
+                }
+            InputArtifacts:
+            - Name: "INFRASTRUCTURE_SOURCE_FILES"
+            OutputArtifacts:
+            - Name: "CODEBUILD_GITHUB_SOURCE_CREDENTIAL_OUTPUT"
+            RunOrder: 1
+            Region: !Ref "AWS::Region"
+        - !Ref "AWS::NoValue"
+      - !If
+        - CreateDomainNameHostedZone
+        - Name: "Route53"
+          Actions:
+          - Name: "Hosted_Zone"
+            ActionTypeId:
+              Category: "Deploy"
+              Owner: "AWS"
+              Provider: "CloudFormation"
+              Version: "1"
+            Configuration:
+              ActionMode: !Ref ActionMode
+              StackName: !Sub "${InfrastructureName}-route53-hosted-zone"
+              Capabilities: !Ref CloudFormationCapabilities
+              TemplatePath:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/route53/hosted-zone/public.yaml"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+              TemplateConfiguration:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/route53/hosted-zone/public/${Environment}.json"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+                  Environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+              RoleArn: !GetAtt InfrastructureServiceRole.Arn
+              OutputFileName: "out.json"
+              ParameterOverrides: !Sub |
+                {
+                  "InfrastructureName": "${InfrastructureName}",
+                  "HostedZoneName": "${HostedZoneDomainName}"
+                }
+            InputArtifacts:
+            - Name: "INFRASTRUCTURE_SOURCE_FILES"
+            OutputArtifacts:
+            - Name: "ROUTE53_HOSTED_ZONE_OUTPUT"
+            RunOrder: 1
+            Region: !Ref "AWS::Region"
+          - !If
+            - NonProdDomainEntry
+            - Name: "NonProd_Name_Server_Entry"
+              ActionTypeId:
+                Category: "Deploy"
+                Owner: "AWS"
+                Provider: "CloudFormation"
+                Version: "1"
+              Configuration:
+                ActionMode: !Ref ActionMode
+                StackName: !Sub "${InfrastructureName}-route53-nonprod-name-server-entry"
+                Capabilities: !Ref CloudFormationCapabilities
+                TemplatePath:
+                  Fn::Sub:
+                  - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/route53/record-set/name-server.yaml"
+                  - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+                TemplateConfiguration:
+                  Fn::Sub:
+                  - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/route53/record-set/name-server/${Environment}.json"
+                  - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+                    Environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+                RoleArn: !GetAtt InfrastructureServiceRole.Arn
+                OutputFileName: "out.json"
+                ParameterOverrides: !Sub |
+                  {
+                    "InfrastructureName": "${InfrastructureName}",
+                    "DomainName": "${NonProdDomainName}",
+                    "NameServerList": "${NonProdNameServerDomains}"
+                  }
+              InputArtifacts:
+              - Name: "INFRASTRUCTURE_SOURCE_FILES"
+              OutputArtifacts:
+              - Name: "ROUTE53_NAME_SERVER_ENTRY_OUTPUT"
+              RunOrder: 2
+              Region: !Ref "AWS::Region"
+            - !Ref "AWS::NoValue"
+        - !Ref "AWS::NoValue"
+      - !If
+        - CreateSecureCertificate
+        - Name: "Certificate_Manager"
+          Actions:
+          - Name: "Secure_Certificate"
+            ActionTypeId:
+              Category: "Deploy"
+              Owner: "AWS"
+              Provider: "CloudFormation"
+              Version: "1"
+            Configuration:
+              ActionMode: !Ref ActionMode
+              StackName: !Sub "${InfrastructureName}-secure-certificate"
+              Capabilities: !Ref CloudFormationCapabilities
+              TemplatePath:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/acm/certificate/${TemplateName}.yaml"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+                  TemplateName: !If [ EnableSubjectAlternativeNames, !Sub "subject-alternative-${SecureCertificateAlternateDomainCount}", "standard" ]
+              TemplateConfiguration:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/acm/certificate/${Environment}.json"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+                  Environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+              RoleArn: !GetAtt InfrastructureServiceRole.Arn
+              OutputFileName: "out.json"
+              ParameterOverrides: !Sub
+              - |
+                {
+                  "InfrastructureName": "${InfrastructureName}",
+                  "PrimaryDomainName": "${SecureCertificatePrimaryDomain}",
+                  "SubjectAlternativeNamesList": "${SecureCertificateAlternateDomains}",
+                  "HostedZoneId": "${HostedZone}"
+                }
+              - HostedZone: !Sub "{{resolve:ssm:/route53/${InfrastructureName}/hosted-zone/id}}"
+            InputArtifacts:
+            - Name: "INFRASTRUCTURE_SOURCE_FILES"
+            OutputArtifacts:
+            - Name: "SECURE_CERTIFICATE_OUTPUT"
+            RunOrder: 1
+            Region: !Ref "AWS::Region"
+        - !Ref "AWS::NoValue"
+      - Name: "IAM"
+        Actions:
+        - Name: "Service_Role_General"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-iam-service-role-general"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/iam/service-role/general.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/iam/service-role/general.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "IAM_SERVICE_ROLE_GENERAL_OUTPUT"
+          RunOrder: 1
+          Region: !Ref "AWS::Region"
+      - Name: "VPC"
+        Actions:
+        - Name: "VPC"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-vpc"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/vpc/main.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/vpc/${Environment}.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+                Environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub
+            - |
+              {
+                "InfrastructureName": "${InfrastructureName}",
+                "Environment": "${Environment}",
+                "RegionUse": "${RegionUse}",
+                "EnableVpcIpv6": "${EnableVpcIpv6}"
+              }
+            - Environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "VPC_OUTPUT"
+          RunOrder: 1
+          Region: !Ref "AWS::Region"
+        - Name: "Security_Group"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-vpc-security-group-general"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/vpc/security-group/general.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/vpc/security-group/general.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt InfrastructureServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "InfrastructureName": "${InfrastructureName}",
+                "VpnIpv4CidrBlock": "${VpnIpv4CidrBlock}"
+              }
+          InputArtifacts:
+          - Name: "INFRASTRUCTURE_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "VPC_SECURITY_GROUP_GENERAL_OUTPUT"
+          RunOrder: 2
+          Region: !Ref "AWS::Region"
+      - !If
+        - CreateBastionInstance
+        - Name: "EC2_Instances"
+          Actions:
+          - Name: "Bastion_Instance"
+            ActionTypeId:
+              Category: "Deploy"
+              Owner: "AWS"
+              Provider: "CloudFormation"
+              Version: "1"
+            Configuration:
+              ActionMode: !Ref ActionMode
+              StackName: !Sub "${InfrastructureName}-bastion-instance"
+              Capabilities: !Ref CloudFormationCapabilities
+              TemplatePath:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}iac/cfn/ec2/instance/bastion.yaml"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+              TemplateConfiguration:
+                Fn::Sub:
+                - "INFRASTRUCTURE_SOURCE_FILES::${Folder}env/cfn/ec2/instance/bastion/${Environment}.json"
+                - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+                  Environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+              RoleArn: !GetAtt InfrastructureServiceRole.Arn
+              OutputFileName: "out.json"
+              ParameterOverrides: !Sub
+              - |
+                {
+                  "InfrastructureName": "${InfrastructureName}",
+                  "PrimaryKeyName": "${KeyName}"
+                }
+              - KeyName: !If [ KeyPair, !Ref KeyPair, "{{resolve:ssm:/account/name}}" ]
+            InputArtifacts:
+            - Name: "INFRASTRUCTURE_SOURCE_FILES"
+            OutputArtifacts:
+            - Name: "BASTION_INSTANCE_OUTPUT"
+            RunOrder: 1
+            Region: !Ref "AWS::Region"
+        - !Ref "AWS::NoValue"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  InfrastructureCodePipelineName:
+    Description: "The name of the infrastructure CodePipeline."
+    Value: !Ref InfrastructureCodePipeline
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureCodePipelineName"
+  InfrastructureCodePipelineVersion:
+    Description: "The version of the infrastructure CodePipeline."
+    Value: !GetAtt InfrastructureCodePipeline.Version
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureCodePipelineVersion"
+  InfrastructureServiceRoleArn:
+    Description: "The ARN of the infrastructure service role."
+    Value: !GetAtt InfrastructureServiceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureServiceRoleArn"
+  InfrastructureServiceRoleId:
+    Description: "The ID of the infrastructure service role."
+    Value: !GetAtt InfrastructureServiceRole.RoleId
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureServiceRoleId"
+  InfrastructureServiceRoleName:
+    Description: "The name of the infrastructure service role."
+    Value: !Ref InfrastructureServiceRole
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureServiceRoleName"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName   
+    - Label:
+        default: "CodePipeline Configuration"
+      Parameters:
+      - CloudFormationCapabilities
+      - AppBaseFolder
+      - ActionMode
+      - ExternalAccountId
+    - Label:
+        default: "Manual Approval Configuration"
+      Parameters:
+      - EnableManualApproval
+      - ApprovalMessagePrefix
+      - ApprovalEnvironment
+      - ApprovalMessageSuffix
+    - Label:
+        default: "Source Configuration"
+      Parameters:
+      - SourceObject
+    - Label:
+        default: "Domain Configuration"
+      Parameters:
+      - CreateDomainNameHostedZone
+      - HostedZoneDomainName
+      - NonProdNameServerDomains
+      - NonProdDomainName
+    - Label:
+        default: "Secure Certificate Configuration"
+      Parameters:
+      - CreateSecureCertificate
+      - SecureCertificatePrimaryDomain
+      - SecureCertificateAlternateDomainCount
+      - SecureCertificateAlternateDomains
+    - Label:
+        default: "VPC Configuration"
+      Parameters:
+      - RegionUse
+      - VpnIpv4CidrBlock
+      - CreateBastion
+      - KeyPair
+      - EnableVpcIpv6
+    ParameterLabels:
+      # General Configuration
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      # CodePipeline Configuration
+      CloudFormationCapabilities:
+        default: "CloudFormation Capabilities:"
+      AppBaseFolder:
+        default: "Application Base Folder:"
+      ActionMode:
+        default: "Action Mode:"
+      ExternalAccountId:
+        default: "External Account ID:"
+      # Manual Approval Configuration
+      EnableManualApproval:
+        default: "Enable Manual Approval:"
+      ApprovalMessagePrefix:
+        default: "Approval Message Prefix:"
+      ApprovalEnvironment:
+        default: "Approval Environment:"
+      ApprovalMessageSuffix:
+        default: "Approval Message Suffix:"
+      # Source Configuration
+      SourceObject:
+        default: "Source Object:"
+      # Domain Configuration
+      CreateDomainNameHostedZone:
+        default: "Create Hosted Zone:"
+      HostedZoneDomainName:
+        default: "Hosted Zone Domain Name:"
+      NonProdNameServerDomains:
+        default: "Non-Prod Name Server Domains:"
+      NonProdDomainName:
+        default: "Non-Prod Domain Name:"
+      # Secure Certificate Configuration
+      CreateSecureCertificate:
+        default: "Create Secure Certificate:"
+      SecureCertificatePrimaryDomain:
+        default: "Secure Certificate Primary Domain:"
+      SecureCertificateAlternateDomainCount:
+        default: "Secure Certificate Alternate Domain Count:"
+      SecureCertificateAlternateDomains:
+        default: "Secure Certificate Alternate Domains:"
+      # VPC Configuration
+      RegionUse:
+        default: "Region Use:"
+      VpnIpv4CidrBlock:
+        default: "VPN IPv4 CIDR Block:"
+      CreateBastion:
+        default: "Create Bastion:"
+      KeyPair:
+        default: "EC2 Key Pair:"
+      EnableVpcIpv6:
+        default: "Enable VPC IPv6:"

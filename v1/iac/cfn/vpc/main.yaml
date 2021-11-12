@@ -1,0 +1,1899 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+
+    This is a stack template which creates the following:
+
+    1.  VPC
+    2.  Two VPC Endpoints
+    3.  Internet Gateway
+    4.  Internet Gateway Attachment
+    5.  VPC IPv6 Block (Conditionally)
+    6.  Three NAT EIPs
+    7.  Three Public Subnets (one for each zone)
+    8.  Three Private Subnets (one for each zone)
+    9.  NAT Gateways (one for each zone)
+    10. Three Public Route Tables (one for each zone)
+    11. Three Public Route Table Associations (one for each zone)
+    12. Three Public Routes (one for each zone)
+    13. Three Private Route Tables (one for each zone)
+    14. Three Private Route Table Associations (one for each zone)
+    15. Three Private Routes (one for each zone)
+
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  # NOTE: Have to pass this in because "FindInMap" doesn't work with anything but !Ref
+  Environment:
+    Type: "String"
+    Description: "What kind of AWS account are we setting up?  If this is a non-production/production split account setup, is this the \"nonprod\" or \"prod\" account.  Otherwise, if this is a single account that will hold everything, then this is a single account."
+    AllowedValues:
+    - "nonprod"
+    - "prod"
+    - "single"
+    Default: "nonprod"
+  RegionUse:
+    Type: "String"
+    Description: "Are we using the current region as the primary (region where global or single-region resources will be managed), secondary (region where we replicate to or set up multi-region resources in), or tertiary (generally speaking, the backup/testing region)?"
+    AllowedValues:
+    - "primary"
+    - "secondary"
+    - "tertiary"
+    Default: "primary"
+  EnableVpcIpv6:
+    Type: "String"
+    Description: "Should IPv6 be enabled for this VPC (some regions don't yet support it)?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "Yes"
+Mappings: 
+  VpcCidrBlock:
+    nonprod: 
+      primary: "172.18.0.0/16"
+      secondary: "172.20.0.0/16"
+      tertiary: "172.22.0.0/16"
+    prod: 
+      primary: "172.19.0.0/16"
+      secondary: "172.21.0.0/16"
+      tertiary: "172.23.0.0/16"
+    single: 
+      primary: "172.24.0.0/16"
+      secondary: "172.25.0.0/16"
+      tertiary: "172.26.0.0/16"
+Conditions:
+  EnableVpcIpv6: !Equals [ !Ref EnableVpcIpv6, "Yes" ]
+Resources:
+  Vpc:
+    Type: "AWS::EC2::VPC"
+    Properties:
+      CidrBlock: !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ]
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  InternetGateway:
+    Type: "AWS::EC2::InternetGateway"
+    DependsOn: Vpc
+    Properties:
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  InternetGatewayAttachment:
+    Type: "AWS::EC2::VPCGatewayAttachment"
+    DependsOn:
+    - Vpc
+    - InternetGateway
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+  EgressOnlyInternetGateway:
+    Type: "AWS::EC2::EgressOnlyInternetGateway"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    Properties:
+      VpcId: !Ref Vpc
+  VpcIpv6CidrBlock:
+    Type: "AWS::EC2::VPCCidrBlock"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    - InternetGateway
+    - InternetGatewayAttachment
+    - EgressOnlyInternetGateway
+    Properties:
+      AmazonProvidedIpv6CidrBlock: true
+      VpcId: !Ref Vpc
+  NatEipZone1:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  NatEipZone2:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  NatEipZone3:
+    Type: "AWS::EC2::EIP"
+    Properties:
+      Domain: "vpc"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicSubnetZone1:
+    Type: "AWS::EC2::Subnet"
+    DependsOn:
+    - Vpc
+    - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [ 0, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      AvailabilityZone: 
+        Fn::Select: 
+          - 0
+          - Fn::GetAZs: !Ref "AWS::Region"
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: "Name"
+        Value: !Sub
+        - "${AWS::StackName}-public-${Zone}"
+        - Zone:
+            Fn::Select: 
+            - 0
+            - Fn::GetAZs: !Ref "AWS::Region"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicSubnetZone2:
+    Type: "AWS::EC2::Subnet"
+    DependsOn:
+    - Vpc
+    - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [ 1, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      AvailabilityZone: 
+        Fn::Select: 
+          - 1
+          - Fn::GetAZs: !Ref "AWS::Region"
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: "Name"
+        Value: !Sub
+        - "${AWS::StackName}-public-${Zone}"
+        - Zone:
+            Fn::Select: 
+            - 1
+            - Fn::GetAZs: !Ref "AWS::Region"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicSubnetZone3:
+    Type: "AWS::EC2::Subnet"
+    DependsOn:
+    - Vpc
+    - InternetGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [ 2, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      AvailabilityZone: 
+        Fn::Select: 
+          - 2
+          - Fn::GetAZs: !Ref "AWS::Region"
+      MapPublicIpOnLaunch: true
+      Tags:
+      - Key: "Name"
+        Value: !Sub
+        - "${AWS::StackName}-public-${Zone}"
+        - Zone:
+            Fn::Select: 
+            - 2
+            - Fn::GetAZs: !Ref "AWS::Region"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PrivateSubnetZone1:
+    Type: "AWS::EC2::Subnet"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [ 3, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      AvailabilityZone: 
+        Fn::Select: 
+          - 0
+          - Fn::GetAZs: !Ref "AWS::Region"
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: "Name"
+        Value: !Sub
+        - "${AWS::StackName}-private-${Zone}"
+        - Zone:
+            Fn::Select: 
+            - 0
+            - Fn::GetAZs: !Ref "AWS::Region"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PrivateSubnetZone2:
+    Type: "AWS::EC2::Subnet"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [ 4, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      AvailabilityZone: 
+        Fn::Select: 
+          - 1
+          - Fn::GetAZs: !Ref "AWS::Region"
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: "Name"
+        Value: !Sub
+        - "${AWS::StackName}-private-${Zone}"
+        - Zone:
+            Fn::Select: 
+            - 1
+            - Fn::GetAZs: !Ref "AWS::Region"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PrivateSubnetZone3:
+    Type: "AWS::EC2::Subnet"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: !Select [ 5, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      AvailabilityZone: 
+        Fn::Select: 
+          - 2
+          - Fn::GetAZs: !Ref "AWS::Region"
+      MapPublicIpOnLaunch: false
+      Tags:
+      - Key: "Name"
+        Value: !Sub
+        - "${AWS::StackName}-private-${Zone}"
+        - Zone:
+            Fn::Select: 
+            - 2
+            - Fn::GetAZs: !Ref "AWS::Region"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  NatGatewayZone1:
+    Type: "AWS::EC2::NatGateway"
+    DependsOn:
+    - PublicSubnetZone1
+    - NatEipZone1
+    Properties:
+      AllocationId: !GetAtt NatEipZone1.AllocationId
+      SubnetId: !Ref PublicSubnetZone1
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  NatGatewayZone2:
+    Type: "AWS::EC2::NatGateway"
+    DependsOn:
+    - PublicSubnetZone2
+    - NatEipZone2
+    Properties:
+      AllocationId:  !GetAtt NatEipZone2.AllocationId
+      SubnetId: !Ref PublicSubnetZone2
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  NatGatewayZone3:
+    Type: "AWS::EC2::NatGateway"
+    DependsOn:
+    - PublicSubnetZone3
+    - NatEipZone3
+    Properties:
+      AllocationId:  !GetAtt NatEipZone3.AllocationId
+      SubnetId: !Ref PublicSubnetZone3
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicRouteTableZone1:
+    Type: "AWS::EC2::RouteTable"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicRouteTableZone2:
+    Type: "AWS::EC2::RouteTable"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicRouteTableZone3:
+    Type: "AWS::EC2::RouteTable"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicSubnetRouteTableAssociationZone1:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn:
+    - PublicSubnetZone1
+    - PublicRouteTableZone1
+    Properties:
+      SubnetId: !Ref PublicSubnetZone1
+      RouteTableId: !Ref PublicRouteTableZone1
+  PublicSubnetRouteTableAssociationZone2:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn:
+    - PublicSubnetZone2
+    - PublicRouteTableZone2
+    Properties:
+      SubnetId: !Ref PublicSubnetZone2
+      RouteTableId: !Ref PublicRouteTableZone2
+  PublicSubnetRouteTableAssociationZone3:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn:
+    - PublicSubnetZone3
+    - PublicRouteTableZone3
+    Properties:
+      SubnetId: !Ref PublicSubnetZone3
+      RouteTableId: !Ref PublicRouteTableZone3
+  PublicRouteZone1:
+    Type: "AWS::EC2::Route"
+    DependsOn:
+    - PublicRouteTableZone1
+    - InternetGateway
+    - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTableZone1
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+  PublicRouteZone2:
+    Type: "AWS::EC2::Route"
+    DependsOn:
+    - PublicRouteTableZone2
+    - InternetGateway
+    - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTableZone2
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+  PublicRouteZone3:
+    Type: "AWS::EC2::Route"
+    DependsOn:
+    - PublicRouteTableZone3
+    - InternetGateway
+    - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTableZone3
+      DestinationCidrBlock: "0.0.0.0/0"
+      GatewayId: !Ref InternetGateway
+  PublicIpv6RouteZone1:
+    Type: "AWS::EC2::Route"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - PublicRouteTableZone1
+    - InternetGateway
+    - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTableZone1
+      DestinationIpv6CidrBlock: "::/0"
+      GatewayId: !Ref InternetGateway
+  PublicIpv6RouteZone2:
+    Type: "AWS::EC2::Route"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - PublicRouteTableZone2
+    - InternetGateway
+    - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTableZone2
+      DestinationIpv6CidrBlock: "::/0"
+      GatewayId: !Ref InternetGateway
+  PublicIpv6RouteZone3:
+    Type: "AWS::EC2::Route"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - PublicRouteTableZone3
+    - InternetGateway
+    - InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTableZone3
+      DestinationIpv6CidrBlock: "::/0"
+      GatewayId: !Ref InternetGateway
+  PrivateRouteTableZone1:
+    Type: "AWS::EC2::RouteTable"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PrivateRouteTableZone2:
+    Type: "AWS::EC2::RouteTable"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PrivateRouteTableZone3:
+    Type: "AWS::EC2::RouteTable"
+    DependsOn: Vpc
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PrivateSubnetRouteTableAssociationZone1:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn:
+    - PrivateSubnetZone1
+    - PrivateRouteTableZone1
+    Properties:
+      SubnetId: !Ref PrivateSubnetZone1
+      RouteTableId: !Ref PrivateRouteTableZone1
+  PrivateSubnetRouteTableAssociationZone2:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn:
+    - PrivateSubnetZone2
+    - PrivateRouteTableZone2
+    Properties:
+      SubnetId: !Ref PrivateSubnetZone2
+      RouteTableId: !Ref PrivateRouteTableZone2
+  PrivateSubnetRouteTableAssociationZone3:
+    Type: "AWS::EC2::SubnetRouteTableAssociation"
+    DependsOn:
+    - PrivateSubnetZone3
+    - PrivateRouteTableZone3
+    Properties:
+      SubnetId: !Ref PrivateSubnetZone3
+      RouteTableId: !Ref PrivateRouteTableZone3
+  PrivateRouteZone1:
+    Type: "AWS::EC2::Route"
+    DependsOn:
+    - PrivateRouteTableZone1
+    - NatGatewayZone1
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableZone1
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGatewayZone1
+  PrivateRouteZone2:
+    Type: "AWS::EC2::Route"
+    DependsOn:
+    - PrivateRouteTableZone2
+    - NatGatewayZone2
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableZone2
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGatewayZone2
+  PrivateRouteZone3:
+    Type: "AWS::EC2::Route"
+    DependsOn:
+    - PrivateRouteTableZone3
+    - NatGatewayZone3
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableZone3
+      DestinationCidrBlock: "0.0.0.0/0"
+      NatGatewayId: !Ref NatGatewayZone3
+  PrivateIpv6RouteZone1:
+    Type: "AWS::EC2::Route"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - PrivateRouteTableZone1
+    - EgressOnlyInternetGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableZone1
+      DestinationIpv6CidrBlock: "::/0"
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGateway
+  PrivateIpv6RouteZone2:
+    Type: "AWS::EC2::Route"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - PrivateRouteTableZone2
+    - EgressOnlyInternetGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableZone2
+      DestinationIpv6CidrBlock: "::/0"
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGateway
+  PrivateIpv6RouteZone3:
+    Type: "AWS::EC2::Route"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - PrivateRouteTableZone3
+    - EgressOnlyInternetGateway
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableZone3
+      DestinationIpv6CidrBlock: "::/0"
+      EgressOnlyInternetGatewayId: !Ref EgressOnlyInternetGateway
+  VpcPrivateEndpointS3:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal: "*"
+          Action: "*"
+          Resource: "*"
+      VpcId: !Ref Vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      RouteTableIds:
+      - !Ref PrivateRouteTableZone1
+      - !Ref PrivateRouteTableZone2
+      - !Ref PrivateRouteTableZone3
+  VpcPublicEndpointS3:
+    Type: "AWS::EC2::VPCEndpoint"
+    Properties:
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal: "*"
+          Action: "*"
+          Resource: "*"
+      VpcId: !Ref Vpc
+      ServiceName: !Sub "com.amazonaws.${AWS::Region}.s3"
+      RouteTableIds:
+      - !Ref PublicRouteTableZone1
+      - !Ref PublicRouteTableZone2
+      - !Ref PublicRouteTableZone3
+  # IPv6 Additions
+  PublicSubnetCidrBlockIpv6Zone1:
+    Type: "AWS::EC2::SubnetCidrBlock"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    - VpcIpv6CidrBlock
+    Properties:
+      Ipv6CidrBlock: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "0::/64" ] ]
+      SubnetId: !Ref PublicSubnetZone1
+  PublicSubnetCidrBlockIpv6Zone2:
+    Type: "AWS::EC2::SubnetCidrBlock"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    - VpcIpv6CidrBlock
+    Properties:
+      Ipv6CidrBlock: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "1::/64" ] ]
+      SubnetId: !Ref PublicSubnetZone2
+  PublicSubnetCidrBlockIpv6Zone3:
+    Type: "AWS::EC2::SubnetCidrBlock"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    - VpcIpv6CidrBlock
+    Properties:
+      Ipv6CidrBlock: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "2::/64" ] ]
+      SubnetId: !Ref PublicSubnetZone3
+  PrivateSubnetCidrBlockIpv6Zone1:
+    Type: "AWS::EC2::SubnetCidrBlock"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    - VpcIpv6CidrBlock
+    Properties:
+      Ipv6CidrBlock: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "3::/64" ] ]
+      SubnetId: !Ref PrivateSubnetZone1
+  PrivateSubnetCidrBlockIpv6Zone2:
+    Type: "AWS::EC2::SubnetCidrBlock"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    - VpcIpv6CidrBlock
+    Properties:
+      Ipv6CidrBlock: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "4::/64" ] ]
+      SubnetId: !Ref PrivateSubnetZone2
+  PrivateSubnetCidrBlockIpv6Zone3:
+    Type: "AWS::EC2::SubnetCidrBlock"
+    Condition: EnableVpcIpv6
+    DependsOn:
+    - Vpc
+    - VpcIpv6CidrBlock
+    Properties:
+      Ipv6CidrBlock: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "5::/64" ] ]
+      SubnetId: !Ref PrivateSubnetZone3
+  # SSM Parameters
+  ParamVpcId:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Vpc
+    Properties:
+      DataType: "text"
+      Description: "The VPC ID."
+      Name: !Sub "/vpc/${InfrastructureName}/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref Vpc
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamVpcCidrBlock:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Vpc
+    Properties:
+      DataType: "text"
+      Description: "The VPC IPv4 CIDR block."
+      Name: !Sub "/vpc/${InfrastructureName}/cidr/ipv4/block"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Vpc.CidrBlock
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamVpcPrivateEndpointS3Id:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: VpcPrivateEndpointS3
+    Properties:
+      DataType: "text"
+      Description: "The VPC private S3 endpoint ID."
+      Name: !Sub "/vpc/${InfrastructureName}/endpoint/private/s3/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref VpcPrivateEndpointS3
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamVpcPublicEndpointS3Id:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: VpcPublicEndpointS3
+    Properties:
+      DataType: "text"
+      Description: "The VPC public S3 endpoint ID."
+      Name: !Sub "/vpc/${InfrastructureName}/endpoint/public/s3/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref VpcPublicEndpointS3
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamInternetGatewayId:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: InternetGateway
+    Properties:
+      DataType: "text"
+      Description: "The standard Internet Gateway ID for the VPC."
+      Name: !Sub "/vpc/${InfrastructureName}/internet-gateway/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref InternetGateway
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEgressOnlyInternetGatewayId:
+    Type: "AWS::SSM::Parameter"
+    Condition: EnableVpcIpv6
+    DependsOn: EgressOnlyInternetGateway
+    Properties:
+      DataType: "text"
+      Description: "The IPv6 Egress-Only Internet Gateway for the VPC."
+      Name: !Sub "/vpc/${InfrastructureName}/internet-gateway/egress-only/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref EgressOnlyInternetGateway
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamVpcIpv6CidrBlocks:
+    Type: "AWS::SSM::Parameter"
+    DependsOn:
+    - Vpc
+    - VpcIpv6CidrBlock
+    Properties:
+      DataType: "text"
+      Description: "The VPC IPv6 CIDR block."
+      Name: !Sub "/vpc/${InfrastructureName}/cidr/ipv6/blocks"
+      Tier: "Standard"
+      Type: "String"
+      Value:
+        Fn::Join: [ ",", !GetAtt Vpc.Ipv6CidrBlocks ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamAvailabilityZone1:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicSubnetZone1
+    Properties:
+      DataType: "text"
+      Description: "The first availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt PublicSubnetZone1.AvailabilityZone
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamAvailabilityZone2:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicSubnetZone2
+    Properties:
+      DataType: "text"
+      Description: "The second availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt PublicSubnetZone2.AvailabilityZone
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamAvailabilityZone3:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicSubnetZone3
+    Properties:
+      DataType: "text"
+      Description: "The third availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt PublicSubnetZone3.AvailabilityZone
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamNatEipZone1:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: NatEipZone1
+    Properties:
+      DataType: "text"
+      Description: "The first zone public Elastic IP."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/nat/eip/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref NatEipZone1
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamNatEipZone2:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: NatEipZone2
+    Properties:
+      DataType: "text"
+      Description: "The second zone public Elastic IP."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/nat/eip/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref NatEipZone2
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamNatEipZone3:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: NatEipZone3
+    Properties:
+      DataType: "text"
+      Description: "The third zone public Elastic IP."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/nat/eip/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref NatEipZone3
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamNatEipCidrBlockZone1:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: NatEipZone1
+    Properties:
+      DataType: "text"
+      Description: "The first zone public Elastic IP (CIDR Block)."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/nat/eip/cidr-block/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Sub "${NatEipZone1}/32"
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamNatEipCidrBlockZone2:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: NatEipZone2
+    Properties:
+      DataType: "text"
+      Description: "The second zone public Elastic IP (CIDR Block)."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/nat/eip/cidr-block/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Sub "${NatEipZone2}/32"
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamNatEipCidrBlockZone3:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: NatEipZone3
+    Properties:
+      DataType: "text"
+      Description: "The third zone public Elastic IP (CIDR Block)."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/nat/eip/cidr-block/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Sub "${NatEipZone3}/32"
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetZone1:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicSubnetZone1
+    Properties:
+      DataType: "text"
+      Description: "The public subnet zone 1."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/zone/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PublicSubnetZone1
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetZone2:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicSubnetZone2
+    Properties:
+      DataType: "text"
+      Description: "The public subnet zone 2."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/zone/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PublicSubnetZone2
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetZone3:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicSubnetZone3
+    Properties:
+      DataType: "text"
+      Description: "The public subnet zone 3."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/zone/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PublicSubnetZone3
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetCidrBlockZone1:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The public subnet IPv4 CIDR Block zone 1."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/cidr-block/ipv4/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Select [ 0, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetCidrBlockZone2:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The public subnet IPv4 CIDR Block zone 2."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/cidr-block/ipv4/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Select [ 1, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetCidrBlockZone3:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The public subnet IPv4 CIDR Block zone 3."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/cidr-block/ipv4/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Select [ 2, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetZone1:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PrivateSubnetZone1
+    Properties:
+      DataType: "text"
+      Description: "The private subnet zone 1."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/zone/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PrivateSubnetZone1
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetZone2:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PrivateSubnetZone2
+    Properties:
+      DataType: "text"
+      Description: "The private subnet zone 2."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/zone/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PrivateSubnetZone2
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetZone3:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PrivateSubnetZone3
+    Properties:
+      DataType: "text"
+      Description: "The private subnet zone 3."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/zone/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PrivateSubnetZone3
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetCidrBlockZone1:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The private subnet IPv4 CIDR Block zone 1."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/cidr-block/ipv4/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Select [ 3, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetCidrBlockZone2:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The private subnet IPv4 CIDR Block zone 2."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/cidr-block/ipv4/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Select [ 4, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetCidrBlockZone3:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The private subnet IPv4 CIDR Block zone 3."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/cidr-block/ipv4/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Select [ 5, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicRouteTableZone1:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicRouteTableZone1
+    Properties:
+      DataType: "text"
+      Description: "The public route table for the first availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/public/route-table/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PublicRouteTableZone1
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicRouteTableZone2:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicRouteTableZone2
+    Properties:
+      DataType: "text"
+      Description: "The public route table for the second availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/public/route-table/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PublicRouteTableZone2
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicRouteTableZone3:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PublicRouteTableZone3
+    Properties:
+      DataType: "text"
+      Description: "The public route table for the third availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/public/route-table/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PublicRouteTableZone3
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateRouteTableZone1:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PrivateRouteTableZone1
+    Properties:
+      DataType: "text"
+      Description: "The private route table for the first availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/private/route-table/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PrivateRouteTableZone1
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateRouteTableZone2:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PrivateRouteTableZone2
+    Properties:
+      DataType: "text"
+      Description: "The private route table for the second availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/private/route-table/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PrivateRouteTableZone2
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateRouteTableZone3:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: PrivateRouteTableZone3
+    Properties:
+      DataType: "text"
+      Description: "The private route table for the third availability zone."
+      Name: !Sub "/vpc/${InfrastructureName}/availability-zone/private/route-table/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref PrivateRouteTableZone3
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamDefaultSecurityGroup:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Vpc
+    Properties:
+      DataType: "text"
+      Description: "The default security group ID for this VPC."
+      Name: !Sub "/vpc/${InfrastructureName}/security-group/default/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Vpc.DefaultSecurityGroup
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetCidrBlockIpv6Zone1:
+    Type: "AWS::SSM::Parameter"
+    Condition: EnableVpcIpv6
+    DependsOn: PublicSubnetCidrBlockIpv6Zone1
+    Properties:
+      DataType: "text"
+      Description: "The public subnet IPv6 CIDR Block for zone 1."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/cidr-block/ipv6/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "0::/64" ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetCidrBlockIpv6Zone2:
+    Type: "AWS::SSM::Parameter"
+    Condition: EnableVpcIpv6
+    DependsOn: PublicSubnetCidrBlockIpv6Zone2
+    Properties:
+      DataType: "text"
+      Description: "The public subnet IPv6 CIDR Block for zone 2."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/cidr-block/ipv6/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "1::/64" ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicSubnetCidrBlockIpv6Zone3:
+    Type: "AWS::SSM::Parameter"
+    Condition: EnableVpcIpv6
+    DependsOn: PublicSubnetCidrBlockIpv6Zone3
+    Properties:
+      DataType: "text"
+      Description: "The public subnet IPv6 CIDR Block for zone 3."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/public/cidr-block/ipv6/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "2::/64" ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetCidrBlockIpv6Zone1:
+    Type: "AWS::SSM::Parameter"
+    Condition: EnableVpcIpv6
+    DependsOn: PrivateSubnetCidrBlockIpv6Zone1
+    Properties:
+      DataType: "text"
+      Description: "The private subnet IPv6 CIDR Block for zone 1."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/cidr-block/ipv6/one"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "3::/64" ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetCidrBlockIpv6Zone2:
+    Type: "AWS::SSM::Parameter"
+    Condition: EnableVpcIpv6
+    DependsOn: PrivateSubnetCidrBlockIpv6Zone2
+    Properties:
+      DataType: "text"
+      Description: "The private subnet IPv6 CIDR Block for zone 2."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/cidr-block/ipv6/two"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "4::/64" ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPrivateSubnetCidrBlockIpv6Zone3:
+    Type: "AWS::SSM::Parameter"
+    Condition: EnableVpcIpv6
+    DependsOn: PrivateSubnetCidrBlockIpv6Zone3
+    Properties:
+      DataType: "text"
+      Description: "The private subnet IPv6 CIDR Block for zone 3."
+      Name: !Sub "/vpc/${InfrastructureName}/subnet/private/cidr-block/ipv6/three"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Join [ "", [ !Select [ 0, !Split [ "0::/56", !Join [ ",", !GetAtt Vpc.Ipv6CidrBlocks ] ] ], "5::/64" ] ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  VpcId:
+    Description: "The VPC ID."
+    Value: !Ref Vpc
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcId"
+  VpcCidrBlock:
+    Description: "The VPC IPv4 CIDR block."
+    Value: !GetAtt Vpc.CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcCidrBlock"
+  VpcPrivateEndpointS3Id:
+    Description: "The VPC Private S3 Endpoint ID."
+    Value: !Ref VpcPrivateEndpointS3
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcPrivateEndpointS3Id"
+  VpcPublicEndpointS3Id:
+    Description: "The VPC Public S3 Endpoint ID."
+    Value: !Ref VpcPublicEndpointS3
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcPublicEndpointS3Id"
+  InternetGatewayId:
+    Description: "The standard Internet Gateway for the VPC."
+    Value: !Ref InternetGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-InternetGatewayId"
+  EgressOnlyInternetGatewayId:
+    Description: "The IPv6 Egress-Only Internet Gateway for the VPC."
+    Condition: EnableVpcIpv6
+    Value: !Ref EgressOnlyInternetGateway
+    Export:
+      Name: !Sub "${AWS::StackName}-EgressOnlyInternetGatewayId"
+  VpcIpv6CidrBlocks:
+    Description: "The VPC IPv6 CIDR block."
+    Condition: EnableVpcIpv6
+    Value:
+      Fn::Join: [ ",", !GetAtt Vpc.Ipv6CidrBlocks ]
+    Export:
+      Name: !Sub "${AWS::StackName}-VpcIpv6CidrBlocks"
+  AvailabilityZone1:
+    Description: "The first zone."
+    Value: !GetAtt PublicSubnetZone1.AvailabilityZone
+    Export:
+      Name: !Sub "${AWS::StackName}-Zone1"
+  NatEipZone1:
+    Description: "The first zone public Elastic IP."
+    Value: !Ref NatEipZone1
+    Export:
+      Name: !Sub "${AWS::StackName}-NatEipZone1"
+  NatEipCidrBlockZone1:
+    Description: "The first zone public Elastic IP CIDR block."
+    Value: !Sub "${NatEipZone1}/32"
+    Export:
+      Name: !Sub "${AWS::StackName}-NatEipCidrBlockZone1"
+  AvailabilityZone2:
+    Description: "The second zone."
+    Value: !GetAtt PublicSubnetZone2.AvailabilityZone
+    Export:
+      Name: !Sub "${AWS::StackName}-Zone2"
+  NatEipZone2:
+    Description: "The second zone public Elastic IP."
+    Value: !Ref NatEipZone2
+    Export:
+      Name: !Sub "${AWS::StackName}-NatEipZone2"
+  NatEipCidrBlockZone2:
+    Description: "The second zone public Elastic IP CIDR block."
+    Value: !Sub "${NatEipZone2}/32"
+    Export:
+      Name: !Sub "${AWS::StackName}-NatEipCidrBlockZone2"
+  AvailabilityZone3:
+    Description: "The third zone."
+    Value: !GetAtt PublicSubnetZone3.AvailabilityZone
+    Export:
+      Name: !Sub "${AWS::StackName}-Zone3"
+  NatEipZone3:
+    Description: "The third zone public Elastic IP."
+    Value: !Ref NatEipZone3
+    Export:
+      Name: !Sub "${AWS::StackName}-NatEipZone3"
+  NatEipCidrBlockZone3:
+    Description: "The third zone public Elastic IP CIDR block."
+    Value: !Sub "${NatEipZone3}/32"
+    Export:
+      Name: !Sub "${AWS::StackName}-NatEipCidrBlockZone3"
+  PublicSubnetZone1:
+    Description: "The public subnet zone 1."
+    Value: !Ref PublicSubnetZone1
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetZone1"
+  PublicSubnetCidrBlockZone1:
+    Description: "The public subnet IPv4 CIDR Block zone 1."
+    Value: !Select [ 0, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCidrBlockZone1"
+  PublicSubnetZone2:
+    Description: "The public subnet zone 2."
+    Value: !Ref PublicSubnetZone2
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetZone2"
+  PublicSubnetCidrBlockZone2:
+    Description: "The public subnet IPv4 CIDR Block zone 2."
+    Value: !Select [ 1, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCidrBlockZone2"
+  PublicSubnetZone3:
+    Description: "The public subnet zone 3."
+    Value: !Ref PublicSubnetZone3
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetZone3"
+  PublicSubnetCidrBlockZone3:
+    Description: "The public subnet IPv4 CIDR Block zone 3."
+    Value: !Select [ 2, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCidrBlockZone3"
+  PrivateSubnetZone1:
+    Description: "The private subnet zone 1."
+    Value: !Ref PrivateSubnetZone1
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetZone1"
+  PrivateSubnetCidrBlockZone1:
+    Description: "The private subnet IPv4 CIDR Block zone 1."
+    Value: !Select [ 3, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCidrBlockZone1"
+  PrivateSubnetZone2:
+    Description: "The private subnet zone 2."
+    Value: !Ref PrivateSubnetZone2
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetZone2"
+  PrivateSubnetCidrBlockZone2:
+    Description: "The private subnet IPv4 CIDR Block zone 2."
+    Value: !Select [ 4, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCidrBlockZone2"
+  PrivateSubnetZone3:
+    Description: "The private subnet zone 3."
+    Value: !Ref PrivateSubnetZone3
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetZone3"
+  PrivateSubnetCidrBlockZone3:
+    Description: "The private subnet IPv4 CIDR Block zone 3."
+    Value: !Select [ 5, !Cidr [ !FindInMap [ "VpcCidrBlock", !Ref Environment, !Ref RegionUse ], 8, 13 ] ]
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCidrBlockZone3"
+  PublicRouteTableZone1:
+    Description: "The public route table for the first zone."
+    Value: !Ref PublicRouteTableZone1
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicRouteTableZone1"
+  PublicRouteTableZone2:
+    Description: "The public route table for the second zone."
+    Value: !Ref PublicRouteTableZone2
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicRouteTableZone2"
+  PublicRouteTableZone3:
+    Description: "The public route table for the third zone."
+    Value: !Ref PublicRouteTableZone3
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicRouteTableZone3"
+  PrivateRouteTableZone1:
+    Description: "The public route table for the first zone."
+    Value: !Ref PrivateRouteTableZone1
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateRouteTableZone1"
+  PrivateRouteTableZone2:
+    Description: "The public route table for the second zone."
+    Value: !Ref PrivateRouteTableZone2
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateRouteTableZone2"
+  PrivateRouteTableZone3:
+    Description: "The public route table for the third zone."
+    Value: !Ref PrivateRouteTableZone3
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateRouteTableZone3"
+  DefaultSecurityGroup:
+    Description: "The default security group for this VPC."
+    Value: !GetAtt Vpc.DefaultSecurityGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-DefaultSecurityGroup"
+  PublicSubnetCidrBlockIpv6Zone1:
+    Condition: EnableVpcIpv6
+    Description: "Public subnet IPv6 CIDR block availability zone 1."
+    Value: !Ref PublicSubnetCidrBlockIpv6Zone1
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCidrBlockIpv6Zone1"
+  PublicSubnetCidrBlockIpv6Zone2:
+    Condition: EnableVpcIpv6
+    Description: "Public subnet IPv6 CIDR block availability zone 2."
+    Value: !Ref PublicSubnetCidrBlockIpv6Zone2
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCidrBlockIpv6Zone2"
+  PublicSubnetCidrBlockIpv6Zone3:
+    Condition: EnableVpcIpv6
+    Description: "Public subnet IPv6 CIDR block availability zone 3."
+    Value: !Ref PublicSubnetCidrBlockIpv6Zone3
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicSubnetCidrBlockIpv6Zone3"
+  PrivateSubnetCidrBlockIpv6Zone1:
+    Condition: EnableVpcIpv6
+    Description: "Private subnet IPv6 CIDR block availability zone 1."
+    Value: !Ref PrivateSubnetCidrBlockIpv6Zone1
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCidrBlockIpv6Zone1"
+  PrivateSubnetCidrBlockIpv6Zone2:
+    Condition: EnableVpcIpv6
+    Description: "Private subnet IPv6 CIDR block availability zone 2."
+    Value: !Ref PrivateSubnetCidrBlockIpv6Zone2
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCidrBlockIpv6Zone2"
+  PrivateSubnetCidrBlockIpv6Zone3:
+    Condition: EnableVpcIpv6
+    Description: "Private subnet IPv6 CIDR block availability zone 3."
+    Value: !Ref PrivateSubnetCidrBlockIpv6Zone3
+    Export:
+      Name: !Sub "${AWS::StackName}-PrivateSubnetCidrBlockIpv6Zone3"
+  # SSM Parameter
+  # NOTE: Commenting these out because there is a limit of 60 outputs from a template
+  # ParamVpcId:
+  #   Description: "The VPC ID SSM Parameter."
+  #   Value: !Ref ParamVpcId
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamVpcId"
+  # ParamVpcCidrBlock:
+  #   Description: "The VPC IPv4 CIDR block SSM Parameter."
+  #   Value: !Ref ParamVpcCidrBlock
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamVpcCidrBlock"
+  # ParamVpcPrivateEndpointS3Id:
+  #   Description: "The VPC private S3 endpoint ID SSM Parameter."
+  #   Value: !Ref ParamVpcPrivateEndpointS3Id
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamVpcPrivateEndpointS3Id"
+  # ParamVpcPublicEndpointS3Id:
+  #   Description: "The VPC public S3 endpoint ID SSM Parameter."
+  #   Value: !Ref ParamVpcPublicEndpointS3Id
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamVpcPublicEndpointS3Id"
+  # ParamInternetGatewayId:
+  #   Description: "The standard Internet Gateway ID for the VPC SSM Parameter."
+  #   Value: !Ref ParamInternetGatewayId
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamInternetGatewayId"
+  # ParamEgressOnlyInternetGatewayId:
+  #   Description: "The IPv6 Egress-Only Internet Gateway for the VPC SSM Parameter."
+  #   Value: !Ref ParamEgressOnlyInternetGatewayId
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamEgressOnlyInternetGatewayId"
+  # ParamVpcIpv6CidrBlocks:
+  #   Description: "The VPC IPv6 CIDR block SSM Parameter."
+  #   Value: !Ref ParamVpcIpv6CidrBlocks
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamVpcIpv6CidrBlocks"
+  # ParamAvailabilityZone1:
+  #   Description: "The first availability zone SSM Parameter."
+  #   Value: !Ref ParamAvailabilityZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamAvailabilityZone1"
+  # ParamAvailabilityZone2:
+  #   Description: "The second availability zone SSM Parameter."
+  #   Value: !Ref ParamAvailabilityZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamAvailabilityZone2"
+  # ParamAvailabilityZone3:
+  #   Description: "The third availability zone SSM Parameter."
+  #   Value: !Ref ParamAvailabilityZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamAvailabilityZone3"
+  # ParamNatEipZone1:
+  #   Description: "The first zone public Elastic IP SSM Parameter."
+  #   Value: !Ref ParamNatEipZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamNatEipZone1"
+  # ParamNatEipZone2:
+  #   Description: "The second zone public Elastic IP SSM Parameter."
+  #   Value: !Ref ParamNatEipZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamNatEipZone2"
+  # ParamNatEipZone3:
+  #   Description: "The third zone public Elastic IP SSM Parameter."
+  #   Value: !Ref ParamNatEipZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamNatEipZone3"
+  # ParamNatEipCidrBlockZone1:
+  #   Description: "The first zone public Elastic IP (CIDR Block) SSM Parameter."
+  #   Value: !Ref ParamNatEipCidrBlockZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamNatEipCidrBlockZone1"
+  # ParamNatEipCidrBlockZone2:
+  #   Description: "The second zone public Elastic IP (CIDR Block) SSM Parameter."
+  #   Value: !Ref ParamNatEipCidrBlockZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamNatEipCidrBlockZone2"
+  # ParamNatEipCidrBlockZone3:
+  #   Description: "The third zone public Elastic IP (CIDR Block) SSM Parameter."
+  #   Value: !Ref ParamNatEipCidrBlockZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamNatEipCidrBlockZone3"
+  # ParamPublicSubnetZone1:
+  #   Description: "The public subnet zone 1 SSM Parameter."
+  #   Value: !Ref ParamPublicSubnetZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicSubnetZone1"
+  # ParamPublicSubnetZone2:
+  #   Description: "The public subnet zone 2 SSM Parameter."
+  #   Value: !Ref ParamPublicSubnetZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicSubnetZone2"
+  # ParamPublicSubnetZone3:
+  #   Description: "The public subnet zone 3 SSM Parameter."
+  #   Value: !Ref ParamPublicSubnetZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicSubnetZone3"
+  # ParamPublicSubnetCidrBlockZone1:
+  #   Description: "The public subnet IPv4 CIDR Block zone 1 SSM Parameter."
+  #   Value: !Ref ParamPublicSubnetCidrBlockZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicSubnetCidrBlockZone1"
+  # ParamPublicSubnetCidrBlockZone2:
+  #   Description: "The public subnet IPv4 CIDR Block zone 2 SSM Parameter."
+  #   Value: !Ref ParamPublicSubnetCidrBlockZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicSubnetCidrBlockZone2"
+  # ParamPublicSubnetCidrBlockZone3:
+  #   Description: "The public subnet IPv4 CIDR Block zone 3 SSM Parameter."
+  #   Value: !Ref ParamPublicSubnetCidrBlockZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicSubnetCidrBlockZone3"
+  # ParamPrivateSubnetZone1:
+  #   Description: "The private subnet zone 1 SSM Parameter."
+  #   Value: !Ref ParamPrivateSubnetZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateSubnetZone1"
+  # ParamPrivateSubnetZone2:
+  #   Description: "The private subnet zone 2 SSM Parameter."
+  #   Value: !Ref ParamPrivateSubnetZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateSubnetZone2"
+  # ParamPrivateSubnetZone3:
+  #   Description: "The private subnet zone 3 SSM Parameter."
+  #   Value: !Ref ParamPrivateSubnetZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateSubnetZone3"
+  # ParamPrivateSubnetCidrBlockZone1:
+  #   Description: "The private subnet IPv4 CIDR Block zone 1 SSM Parameter."
+  #   Value: !Ref ParamPrivateSubnetCidrBlockZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateSubnetCidrBlockZone1"
+  # ParamPrivateSubnetCidrBlockZone2:
+  #   Description: "The private subnet IPv4 CIDR Block zone 2 SSM Parameter."
+  #   Value: !Ref ParamPrivateSubnetCidrBlockZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateSubnetCidrBlockZone2"
+  # ParamPrivateSubnetCidrBlockZone3:
+  #   Description: "The private subnet IPv4 CIDR Block zone 3 SSM Parameter."
+  #   Value: !Ref ParamPrivateSubnetCidrBlockZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateSubnetCidrBlockZone3"
+  # ParamPublicRouteTableZone1:
+  #   Description: "The public route table for the first availability zone SSM Parameter."
+  #   Value: !Ref ParamPublicRouteTableZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicRouteTableZone1"
+  # ParamPublicRouteTableZone2:
+  #   Description: "The public route table for the second availability zone SSM Parameter."
+  #   Value: !Ref ParamPublicRouteTableZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicRouteTableZone2"
+  # ParamPublicRouteTableZone3:
+  #   Description: "The public route table for the third availability zone SSM Parameter."
+  #   Value: !Ref ParamPublicRouteTableZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPublicRouteTableZone3"
+  # ParamPrivateRouteTableZone1:
+  #   Description: "The private route table for the first availability zone SSM Parameter."
+  #   Value: !Ref ParamPrivateRouteTableZone1
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateRouteTableZone1"
+  # ParamPrivateRouteTableZone2:
+  #   Description: "The private route table for the second availability zone SSM Parameter."
+  #   Value: !Ref ParamPrivateRouteTableZone2
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateRouteTableZone2"
+  # ParamPrivateRouteTableZone3:
+  #   Description: "The private route table for the third availability zone SSM Parameter."
+  #   Value: !Ref ParamPrivateRouteTableZone3
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamPrivateRouteTableZone3"
+  # ParamDefaultSecurityGroup:
+  #   Description: "The default security group for this VPC SSM Parameter."
+  #   Value: !Ref ParamDefaultSecurityGroup
+  #   Export:
+  #     Name: !Sub "${AWS::StackName}-ParamDefaultSecurityGroup"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+      - Environment
+      - RegionUse
+      - EnableVpcIpv6
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      Environment:
+        default: "Environment:"
+      RegionUse:
+        default: "Region Use:"
+      EnableVpcIpv6:
+        default: "Enable VPC IPv6:"

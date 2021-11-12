@@ -1,0 +1,6 @@
+{
+  "Parameters": {
+    "KeyName": "ecs",
+    "KeyDescription": "Encryption key for anything related to the Elastic Container Service."
+  }
+}

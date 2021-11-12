@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Set up the S3 bucket for load balancer logging - (v1.0.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  # Bucket Configuration
+  BucketObjectExpirationInDays:
+    Type: "Number"
+    Description: "The default age of an object before it is automatically deleted from the bucket."
+    Default: 62
+Mappings:
+  # The following load balancer account IDs are needed in order for logs to be written to the S3 bucket.
+  # Details are here: https://docs.aws.amazon.com/elasticloadbalancing/latest/application/load-balancer-access-logs.html
+  LoadBalancerAccountId:
+    us-east-1:
+      Id: "127311923021"
+    us-east-2:
+      Id: "033677994240"
+    us-west-1:
+      Id: "027434742980"
+    us-west-2:
+      Id: "797873946194"
+    ca-central-1:
+      Id: "985666609251"
+    eu-central-1:
+      Id: "054676820928"
+    eu-west-1:
+      Id: "156460612806"
+    eu-west-2:
+      Id: "652711504416"
+    eu-west-3:
+      Id: "009996457667"
+    eu-north-1:
+      Id: "897822967062"
+    ap-east-1:
+      Id: "754344448648"
+    ap-northeast-1:
+      Id: "582318560864"
+    ap-northeast-2:
+      Id: "600734575887"
+    ap-northeast-3:
+      Id: "383597477331"
+    ap-southeast-1:
+      Id: "114774131450"
+    ap-southeast-2:
+      Id: "783225319266"
+    ap-south-1:
+      Id: "718504428378"
+    sa-east-1:
+      Id: "507241528517"
+Resources:
+  LoadBalancerBucket:
+    Type: "AWS::S3::Bucket"
+    Properties:
+      BucketName: !Sub
+      - "${AccountName}-${InfrastructureName}-load-balancer-logging-${AWS::Region}"
+      - AccountName: "{{resolve:ssm:/account/name}}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: "AES256"
+      LifecycleConfiguration:
+        Rules:
+        - Id: "DefaultObjectMaxAge"
+          Prefix: ""
+          Status: "Enabled"
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: !Ref BucketObjectExpirationInDays
+          ExpirationInDays: !Ref BucketObjectExpirationInDays
+          NoncurrentVersionExpirationInDays: !Ref BucketObjectExpirationInDays
+      LoggingConfiguration:
+        DestinationBucketName: !Sub "{{resolve:ssm:/s3/${InfrastructureName}/bucket/logging/server-access/name}}"
+        LogFilePrefix: !Sub
+        - "${AccountName}-${InfrastructureName}-load-balancer-logging-${AWS::Region}/"
+        - AccountName: "{{resolve:ssm:/account/name}}"
+      PublicAccessBlockConfiguration:
+        # Block public access to buckets and objects granted through new access control lists (ACLs)
+        BlockPublicAcls: true
+        # Block public access to buckets and objects granted through any access control lists (ACLs)
+        IgnorePublicAcls: true
+        # Block public access to buckets and objects granted through new public bucket or access point policies
+        BlockPublicPolicy: true
+        # Block public and cross-account access to buckets and objects through any public bucket or access point policies
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: "Suspended"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  LoadBalancerBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref LoadBalancerBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Sid: !Join [ "", [ "Stmt-PutObject-", !FindInMap [ LoadBalancerAccountId, !Ref "AWS::Region", "Id" ] ] ]
+          Effect: "Allow"
+          Principal:
+            AWS: !Join [ "", [ "arn:aws:iam::", !FindInMap [ LoadBalancerAccountId, !Ref "AWS::Region", "Id" ], ":root" ] ]
+          Action: "s3:PutObject"
+          Resource: !Sub "arn:aws:s3:::${LoadBalancerBucket}/*"
+        - Sid: "AWSLogDeliveryWrite"
+          Effect: "Allow"
+          Principal:
+            Service: "delivery.logs.amazonaws.com"
+          Action: "s3:PutObject"
+          Resource: !Sub "arn:aws:s3:::${LoadBalancerBucket}/*"
+          Condition:
+            StringEquals:
+              s3:x-amz-acl: "bucket-owner-full-control"
+        - Sid: "AWSLogDeliveryAclCheck"
+          Effect: "Allow"
+          Principal:
+            Service: "delivery.logs.amazonaws.com"
+          Action: "s3:GetBucketAcl"
+          Resource: !Sub "arn:aws:s3:::${LoadBalancerBucket}"
+  ParamLoadBalancerLoggingBucketName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The elastic load balancer logging bucket name."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/logging/load-balancer/name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref LoadBalancerBucket
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamLoadBalancerLoggingBucketArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The elastic load balancer logging bucket ARN."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/logging/load-balancer/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt LoadBalancerBucket.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  LoadBalancerBucketName:
+    Description: "The bucket name."
+    Value: !Ref LoadBalancerBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-LoadBalancerBucketName"
+  LoadBalancerBucketArn:
+    Description: "The bucket ARN."
+    Value: !GetAtt LoadBalancerBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-LoadBalancerBucketArn"
+  ParamLoadBalancerLoggingBucketName:
+    Description: "The load balancer logging bucket name SSM parameter."
+    Value: !Ref ParamLoadBalancerLoggingBucketName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamLoadBalancerLoggingBucketName"
+  ParamLoadBalancerLoggingBucketArn:
+    Description: "The load balancer logging bucket ARN SSM parameter."
+    Value: !Ref ParamLoadBalancerLoggingBucketArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamLoadBalancerLoggingBucketArn"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    - Label:
+        default: "Bucket Configuration"
+      Parameters:
+      - BucketObjectExpirationInDays
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      BucketObjectExpirationInDays:
+        default: "Default Object Expiration (In Days):"

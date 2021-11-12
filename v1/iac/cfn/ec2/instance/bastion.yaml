@@ -1,0 +1,503 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create a simple bastion instance. - (v1.1.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  PrimaryKeyName:
+    Type: "AWS::EC2::KeyPair::KeyName"
+    Description: "What is the primary SSH Key Name/Key Pair for EC2 instances?"
+  VolumeSize:
+    Type: "Number"
+    Description: "Set the Volume Size in GB."
+    Default: 64
+  ImageId:
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Description: "This is the SSM Parameter containing the latest AMI."
+    Default: "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"
+  InstanceType:
+    Type: "String"
+    Description: "The instance type to be used."
+    Default: "t3a.nano"
+  LogGroupBasePath:
+    Type: "String"
+    Description: "What is the path for the log group."
+    Default: "/ec2/instance/bastion"
+  LogGroupRetention:
+    Type: "Number"
+    Description: "How many days before log entries are deleted?"
+    Default: 7
+  # Monitoring Configuration
+  EnableMonitoring:
+    Type: "String"
+    Description: "Should a monitoring agent be installed and enabled?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "No"
+  MonitoringNoticeCommand:
+    Type: "String"
+    Description: "What is the command you want to run to put a notice in the log that monitoring is being enabled?"
+    Default: ""
+  MonitoringInstallCommand:
+    Type: "String"
+    Description: "What is the command you want to run in order to install the monitoring agent?"
+    Default: ""
+  MonitoringStartCommand:
+    Type: "String"
+    Description: "What is the command you want to run to start the monitoring agent?"
+    Default: ""
+  MonitoringRebootCommand:
+    Type: "String"
+    Description: "What is the command you want to run to ensure the agent restarts on reboot?"
+    Default: ""
+  # DNS Configuration
+  Subdomain:
+    Type: "String"
+    Description: "What is the subdomain for this service?"
+    Default: "citadel"
+  TimeToLive:
+    Type: "Number"
+    Description: "What is the TTL for the DNS entry?"
+    Default: 300
+Conditions:
+  EnableMonitoring: !Equals [ !Ref EnableMonitoring, "Yes" ]
+Resources:
+  CloudWatchLogsGroup:
+    Type: "AWS::Logs::LogGroup"
+    Properties:
+      LogGroupName: !Sub "${LogGroupBasePath}/${Subdomain}"
+      RetentionInDays: !Ref LogGroupRetention
+  Instance:
+    Type: "AWS::EC2::Instance"
+    DependsOn: CloudWatchLogsGroup
+    Properties:
+      AvailabilityZone: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/availability-zone/one}}"
+      BlockDeviceMappings:
+      - DeviceName: "/dev/xvda"
+        Ebs:
+          VolumeSize: !Ref VolumeSize
+          VolumeType: "gp2"
+      KeyName: !Ref PrimaryKeyName
+      ImageId: !Ref ImageId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Sub "{{resolve:ssm:/iam/${InfrastructureName}/profile/instance/bastion/id}}"
+      SourceDestCheck: false
+      NetworkInterfaces:
+      - AssociatePublicIpAddress: true
+        DeviceIndex: "0"
+        GroupSet:
+        - !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/security-group/instance/bastion/id}}"
+        SubnetId: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/subnet/public/zone/one}}"
+      UserData:
+        "Fn::Base64": !Join
+        - ""
+        -
+          - !Sub |
+              #!/bin/bash
+
+              # Run CloudFormation Helper Scripts
+              echo 'Start CloudFormation Helper Scripts'
+              /opt/aws/bin/cfn-init -c start -v --region ${AWS::Region} --stack ${AWS::StackName} --resource Instance
+          - !If
+            - EnableMonitoring
+            - !Sub |
+                echo 'Run Monitoring Scripts'
+                /opt/aws/bin/cfn-init -c monitoring -v --region ${AWS::Region} --stack ${AWS::StackName} --resource Instance
+            - ""
+          - !Sub |
+              echo 'Finish CloudFormation Helper Scripts'
+              /opt/aws/bin/cfn-init -c finish -v --region ${AWS::Region} --stack ${AWS::StackName} --resource Instance
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+    Metadata:
+      AWS::CloudFormation::Init:
+        configSets:
+          monitoring: [ monitoring ]
+          start: [ start ]
+          finish: [ finish ]
+          default: [ start, finish ]
+        # Everything under the "start" configuration will be done first.
+        start:
+          packages:
+            yum:
+              awslogs: []
+          commands:
+            # Install the SSM agent.
+            1-ssm_notice:
+              command: "echo 'Installing SSM agent...'"
+            2-ssm_install:
+              command: "yum install -y https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/linux_amd64/amazon-ssm-agent.rpm"
+            3-ssh_notice:
+              command: "echo 'Increasing the number of SSH keys that can be tried when logging in...'"
+            4-ssh_modify:
+              command: 'sed -i -- "s/#MaxAuthTries 6/MaxAuthTries 36/g" "/etc/ssh/sshd_config"'
+            5-ssh_restart:
+              command: "systemctl restart sshd"
+        monitoring:
+          commands:
+            1-notice:
+              command: !Ref MonitoringNoticeCommand
+            2-install:
+              command: !Ref MonitoringInstallCommand
+            3-enable_on_reboot:
+              command: !Ref MonitoringRebootCommand
+            4-agent_start:
+              command: !Ref MonitoringStartCommand
+        finish:
+          commands:
+            1-yum_update:
+              command: "yum update -y"
+          files:
+            "/etc/cfn/cfn-hup.conf":
+              mode: "000400"
+              owner: "root"
+              group: "root"
+              content: !Sub |
+                [main]
+                stack=${AWS::StackId}
+                region=${AWS::Region}
+            "/etc/cfn/hooks.d/cfn-auto-reloader.conf":
+              mode: "000400"
+              owner: "root"
+              group: "root"
+              content: !Sub |
+                [cfn-auto-reloader-hook]
+                triggers=post.update
+                path=Resources.Instance.Metadata.AWS::CloudFormation::Init
+                action=/opt/aws/bin/cfn-init -v --region ${AWS::Region} --stack ${AWS::StackName} --resource Instance
+            "/etc/awslogs/awscli.conf":
+              # The following sets any CLI-related options for AWS Logs, such as the region to create the logs in.
+              content: !Sub |
+                [plugins]
+                cwlogs=cwlogs
+                [default]
+                region=${AWS::Region}
+            "/etc/awslogs/awslogs.conf":
+              # The following content sets up all the various things that we would like to get logged out to AWS.
+              content: !Sub |
+                [general]
+                state_file = /var/lib/awslogs/agent-state
+                [/var/log/cfn-init.log]
+                file = /var/log/cfn-init.log
+                log_group_name = ${LogGroupBasePath}/${Subdomain}
+                log_stream_name = {instance_id}/var/log/cfn-init.log
+                [/var/log/cloud-init-output.log]
+                file = /var/log/cloud-init-output.log
+                log_group_name = ${LogGroupBasePath}/${Subdomain}
+                log_stream_name = {instance_id}/var/log/cloud-init-output.log
+                [/var/log/cron]
+                file = /var/log/cron
+                log_group_name = ${LogGroupBasePath}/${Subdomain}
+                log_stream_name = {instance_id}/var/log/cron
+                [/var/log/dmesg]
+                file = /var/log/dmesg
+                log_group_name = ${LogGroupBasePath}/${Subdomain}
+                log_stream_name = {instance_id}/var/log/dmesg
+                [/var/log/messages]
+                file = /var/log/messages
+                log_group_name = ${LogGroupBasePath}/${Subdomain}
+                log_stream_name = {instance_id}/var/log/messages
+                datetime_format = %b %d %H:%M:%S
+                [/var/log/secure]
+                file = /var/log/secure
+                log_group_name = ${LogGroupBasePath}/${Subdomain}
+                log_stream_name = {instance_id}/var/log/secure
+                datetime_format = %Y-%m-%dT%H:%M:%SZ
+          services:
+            sysvinit:
+              cfn-hup:
+                enabled: true
+                ensureRunning: true
+                files:
+                - "/etc/cfn/cfn-hup.conf"
+                - "/etc/cfn/hooks.d/cfn-auto-reloader.conf"
+              # This tells sysv to restart awslogs either on reboot or if the configuration file is changed.
+              awslogsd:
+                enabled: true
+                ensureRunning: true
+                files:
+                - "/etc/awslogs/awscli.conf"
+                - "/etc/awslogs/awslogs.conf"
+  DnsEntryCname:
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      HostedZoneId: !Sub "{{resolve:ssm:/route53/${InfrastructureName}/hosted-zone/id}}"
+      Name: !Sub
+      - "${Subdomain}-${Environment}-${AWS::Region}.${HostedZoneUrl}"
+      - Environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        HostedZoneUrl: !Sub "{{resolve:ssm:/route53/${InfrastructureName}/hosted-zone/domain-name}}"
+      Type: "CNAME"
+      TTL: !Ref TimeToLive
+      ResourceRecords:
+      - Fn::GetAtt: Instance.PublicDnsName
+  ParamInstanceId:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Instance
+    Properties:
+      DataType: "text"
+      Description: "Get the ID for this instance."
+      Name: !Sub "/ec2/${InfrastructureName}/instance/bastion/${Subdomain}/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref Instance
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamInstanceAvailabilityZone:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Instance
+    Properties:
+      DataType: "text"
+      Description: "Get the Availability Zone for this instance."
+      Name: !Sub "/ec2/${InfrastructureName}/instance/bastion/${Subdomain}/availability-zone"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Instance.AvailabilityZone
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamInstancePrivateDnsName:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Instance
+    Properties:
+      DataType: "text"
+      Description: "Get the private DNS entry for this instance."
+      Name: !Sub "/ec2/${InfrastructureName}/instance/bastion/${Subdomain}/private/dns/domain-name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Instance.PrivateDnsName
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamInstancePrivateIp:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Instance
+    Properties:
+      DataType: "text"
+      Description: "Get the private IP address for this instance."
+      Name: !Sub "/ec2/${InfrastructureName}/instance/bastion/${Subdomain}/private/ip"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Instance.PrivateIp
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamInstancePublicDnsName:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Instance
+    Properties:
+      DataType: "text"
+      Description: "Get the public DNS entry for this instance."
+      Name: !Sub "/ec2/${InfrastructureName}/instance/bastion/${Subdomain}/public/dns/domain-name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Instance.PublicDnsName
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamInstancePublicIp:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Instance
+    Properties:
+      DataType: "text"
+      Description: "Get the public IP address for this instance."
+      Name: !Sub "/ec2/${InfrastructureName}/instance/bastion/${Subdomain}/public/ip"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Instance.PublicIp
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamDnsEntryCname:
+    Type: "AWS::SSM::Parameter"
+    DependsOn: Instance
+    Properties:
+      DataType: "text"
+      Description: "Custom DNS CNAME entry."
+      Name: !Sub "/ec2/${InfrastructureName}/instance/bastion/${Subdomain}/public/dns/custom/domain-name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Instance.PublicIp
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  CloudWatchLogsGroupName:
+    Description: "The log group name."
+    Value: !Ref CloudWatchLogsGroup
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudWatchLogsGroupName"
+  CloudWatchLogsGroupArn:
+    Description: "The log group ARN."
+    Value: !GetAtt CloudWatchLogsGroup.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-CloudWatchLogsGroupArn"
+  InstanceId:
+    Description: "Get the ID for this instance."
+    Value: !Ref Instance
+    Export:
+      Name: !Sub "${AWS::StackName}-InstanceId"
+  InstanceAvailabilityZone:
+    Description: "Get the Availability Zone for this instance."
+    Value: !GetAtt Instance.AvailabilityZone
+    Export:
+      Name: !Sub "${AWS::StackName}-InstanceAvailabilityZone"
+  InstancePrivateDnsName:
+    Description: "Get the private DNS entry for this instance."
+    Value: !GetAtt Instance.PrivateDnsName
+    Export:
+      Name: !Sub "${AWS::StackName}-InstancePrivateDnsName"
+  InstancePrivateIp:
+    Description: "Get the private IP for this instance."
+    Value: !GetAtt Instance.PrivateIp
+    Export:
+      Name: !Sub "${AWS::StackName}-InstancePrivateIp"
+  InstancePublicDnsName:
+    Description: "Get the public DNS entry for this instance."
+    Value: !GetAtt Instance.PublicDnsName
+    Export:
+      Name: !Sub "${AWS::StackName}-InstancePublicDnsName"
+  InstancePublicIp:
+    Description: "Get the public IP address for this instance."
+    Value: !GetAtt Instance.PublicIp
+    Export:
+      Name: !Sub "${AWS::StackName}-InstancePublicIp"
+  DnsEntryCname:
+    Description: "DNS entry CNAME."
+    Value: !Ref DnsEntryCname
+    Export:
+      Name: !Sub "${AWS::StackName}-DnsEntryCname"
+  ParamInstanceId:
+    Description: "Get the ID for this instance SSM Parameter."
+    Value: !Ref ParamInstanceId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInstanceId"
+  ParamInstanceAvailabilityZone:
+    Description: "Get the Availability Zone for this instance SSM Parameter."
+    Value: !Ref ParamInstanceAvailabilityZone
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInstanceAvailabilityZone"
+  ParamInstancePrivateDnsName:
+    Description: "Get the private DNS entry for this instance SSM Parameter."
+    Value: !Ref ParamInstancePrivateDnsName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInstancePrivateDnsName"
+  ParamInstancePrivateIp:
+    Description: "Get the private IP address for this instance SSM Parameter."
+    Value: !Ref ParamInstancePrivateIp
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInstancePrivateIp"
+  ParamInstancePublicDnsName:
+    Description: "Get the public DNS entry for this instance SSM Parameter."
+    Value: !Ref ParamInstancePublicDnsName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInstancePublicDnsName"
+  ParamInstancePublicIp:
+    Description: "Get the public IP address for this instance SSM Parameter."
+    Value: !Ref ParamInstancePublicIp
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInstancePublicIp"
+  ParamDnsEntryCname:
+    Description: "Custom DNS CNAME entry SSM Parameter."
+    Value: !Ref ParamDnsEntryCname
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamDnsEntryCname"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+      - PrimaryKeyName
+      - VolumeSize
+      - ImageId
+      - InstanceType
+    - Label:
+        default: "Monitoring Configuration"
+      Parameters:
+      - EnableMonitoring
+      - MonitoringNoticeCommand
+      - MonitoringInstallCommand
+      - MonitoringStartCommand
+      - MonitoringRebootCommand
+    - Label:
+        default: "Logging Configuration"
+      Parameters:
+      - LogGroupBasePath
+      - LogGroupRetention
+    - Label:
+        default: "DNS Configuration"
+      Parameters:
+      - Subdomain
+      - TimeToLive
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      PrimaryKeyName:
+        default: "Primary Key Name:"
+      VolumeSize:
+        default: "Volume Size:"
+      ImageId:
+        default: "Image ID:"
+      InstanceType:
+        default: "Instance Type:"
+      EnableMonitoring:
+        default: "Enable Monitoring Logic:"
+      LogGroupBasePath:
+        default: "Log Group Base Path:"
+      LogGroupRetention:
+        default: "Log Group Retention:"
+      Subdomain:
+        default: "Subdomain:"
+      TimeToLive:
+        default: "DNS Time to Live (in seconds):"
+      MonitoringNoticeCommand:
+        default: "Notice Command:"
+      MonitoringInstallCommand:
+        default: "Install Command:"
+      MonitoringStartCommand:
+        default: "Start Command:"
+      MonitoringRebootCommand:
+        default: "Reboot Command:"

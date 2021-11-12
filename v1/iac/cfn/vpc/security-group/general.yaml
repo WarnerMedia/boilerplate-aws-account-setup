@@ -1,0 +1,386 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Set all of the general security groups needed in this VPC."
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  VpnIpv4CidrBlock:
+    Type: "String"
+    Description: "What is the IPv4 CIDR block of the network/VPN that needs access to this VPC (e.g. 203.0.113.0/24)?"
+    Default: ""
+Conditions:
+  EnableVpcIpv6: !Not [ !Equals [ !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv6/blocks}}", "" ] ]
+  VpnIpv4CidrBlock: !Not [ !Equals [ !Ref VpnIpv4CidrBlock, "" ] ]
+Resources:
+  BastionSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Condition: VpnIpv4CidrBlock
+    Properties:
+      GroupDescription: "Bastion Security Group"
+      VpcId: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/id}}"
+      SecurityGroupIngress:
+      - IpProtocol: "icmp"
+        FromPort: -1
+        ToPort: -1
+        CidrIp: !Ref VpnIpv4CidrBlock
+      - IpProtocol: "tcp"
+        FromPort: 22
+        ToPort: 22
+        CidrIp:  !Ref VpnIpv4CidrBlock
+      - IpProtocol: "icmp"
+        FromPort: -1
+        ToPort: -1
+        CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+      - IpProtocol: "tcp"
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+      SecurityGroupEgress:
+      - IpProtocol: "icmp"
+        FromPort: -1
+        ToPort: -1
+        CidrIp: !Ref VpnIpv4CidrBlock
+      - IpProtocol: "tcp"
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Ref VpnIpv4CidrBlock
+      - IpProtocol: "icmp"
+        FromPort: -1
+        ToPort: -1
+        CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+      - IpProtocol: "tcp"
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+      - IpProtocol: "tcp"
+        FromPort: 7777
+        ToPort: 7777
+        CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+      - IpProtocol: "tcp"
+        FromPort: 80
+        ToPort: 80
+        CidrIp: "0.0.0.0/0"
+      - IpProtocol: "tcp"
+        FromPort: 443
+        ToPort: 443
+        CidrIp: "0.0.0.0/0"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}-bastion"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  PublicApplicationLoadBalancerSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Application Load Balancer Security Group"
+      VpcId: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/id}}"
+      SecurityGroupIngress:
+      - IpProtocol: "tcp"
+        FromPort: 80
+        ToPort: 80
+        CidrIp: "0.0.0.0/0"
+      - IpProtocol: "tcp"
+        FromPort: 443
+        ToPort: 443
+        CidrIp: "0.0.0.0/0"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}-public-application-load-balancer"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  EcsHostSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "ECS Host Security Group"
+      VpcId: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/id}}"
+      SecurityGroupIngress:
+      - SourceSecurityGroupId: !Ref PublicApplicationLoadBalancerSecurityGroup
+        IpProtocol: "-1"
+      - IpProtocol: "tcp"
+        FromPort: 22
+        ToPort: 22
+        CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+      - IpProtocol: "icmp"
+        FromPort: -1
+        ToPort: -1
+        CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}-ecs-host"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  EfsSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Elastic File System Security Group"
+      VpcId: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/id}}"
+      SecurityGroupIngress:
+      - SourceSecurityGroupId: !Ref EcsHostSecurityGroup
+        IpProtocol: "tcp"
+        FromPort: 2049
+        ToPort: 2049
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}-efs"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  FargateServiceSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Fargate Service Security Group"
+      VpcId: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/id}}"
+      SecurityGroupIngress:
+      - CidrIp: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv4/block}}"
+        IpProtocol: "-1"
+      Tags:
+      - Key: "Name"
+        Value:  !Sub "${AWS::StackName}-fargate-service"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  # The following are all for IPv6, if it was enabled.
+  PublicApplicationLoadBalancerSecurityGroupHttpIpv6Ingress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Condition: EnableVpcIpv6
+    Properties:
+      GroupId: !Ref PublicApplicationLoadBalancerSecurityGroup
+      CidrIpv6: "::/0"
+      IpProtocol: "tcp"
+      FromPort: 80
+      ToPort: 80
+  PublicApplicationoadBalancerSecurityGroupHttpsIpv6Ingress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Condition: EnableVpcIpv6
+    Properties:
+      GroupId: !Ref PublicApplicationLoadBalancerSecurityGroup
+      CidrIpv6: "::/0"
+      IpProtocol: "tcp"
+      FromPort: 443
+      ToPort: 443
+  EcsHostSecurityGroupSshIpv6Ingress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Condition: EnableVpcIpv6
+    Properties:
+      GroupId: !Ref EcsHostSecurityGroup
+      CidrIpv6: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv6/blocks}}"
+      IpProtocol: "tcp"
+      FromPort: 22
+      ToPort: 22
+  EcsHostSecurityGroupIcmpIpv6Ingress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Condition: EnableVpcIpv6
+    Properties:
+      GroupId: !Ref EcsHostSecurityGroup
+      CidrIpv6: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv6/blocks}}"
+      IpProtocol: "58"
+      FromPort: -1
+      ToPort: -1
+  FargateServiceSecurityGroupIpv6Ingress:
+    Type: "AWS::EC2::SecurityGroupIngress"
+    Condition: EnableVpcIpv6
+    Properties:
+      GroupId: !Ref FargateServiceSecurityGroup
+      CidrIpv6: !Sub "{{resolve:ssm:/vpc/${InfrastructureName}/cidr/ipv6/blocks}}"
+      IpProtocol: "-1"
+  # SSM Parameters
+  ParamVpnIpv4CidrBlock:
+    Type: "AWS::SSM::Parameter"
+    Condition: VpnIpv4CidrBlock
+    Properties:
+      DataType: "text"
+      Description: "The network/VPN IPv4 CIDR block."
+      Name: !Sub "/vpc/${InfrastructureName}/cidr/ipv4/vpn/primary/block"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref VpnIpv4CidrBlock
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamBastionSecurityGroupId:
+    Type: "AWS::SSM::Parameter"
+    Condition: VpnIpv4CidrBlock
+    Properties:
+      DataType: "text"
+      Description: !Sub "Bastion security group for \"${InfrastructureName}\" infrastructure."
+      Name: !Sub "/vpc/${InfrastructureName}/security-group/instance/bastion/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt BastionSecurityGroup.GroupId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamPublicApplicationLoadBalancerSecurityGroupId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The public application load balancer."
+      Name: !Sub "/vpc/${InfrastructureName}/security-group/load-balancer/application/public/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt PublicApplicationLoadBalancerSecurityGroup.GroupId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsHostSecurityGroupId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The Elastic Container Service host security group."
+      Name: !Sub "/vpc/${InfrastructureName}/security-group/instance/ecs/host/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt EcsHostSecurityGroup.GroupId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEfsSecurityGroupId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The Elastic File System security group."
+      Name: !Sub "/vpc/${InfrastructureName}/security-group/efs/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt EfsSecurityGroup.GroupId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamFargateServiceSecurityGroupId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The Fargate service security group."
+      Name: !Sub "/vpc/${InfrastructureName}/security-group/ecs/fargate/service/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt FargateServiceSecurityGroup.GroupId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:  
+  BastionSecurityGroupId:
+    Condition: VpnIpv4CidrBlock
+    Description: "The security group for an EC2 bastion instance."
+    Value: !GetAtt BastionSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-BastionSecurityGroupId"
+  PublicApplicationLoadBalancerSecurityGroupId:
+    Description: "The security group for a public application load balancer."
+    Value: !GetAtt PublicApplicationLoadBalancerSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-PublicApplicationLoadBalancerSecurityGroupId"
+  EcsHostSecurityGroupId:
+    Description: "The security group for ECS host instances."
+    Value: !GetAtt EcsHostSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsHostSecurityGroupId"
+  EfsSecurityGroupId:
+    Description: "The security group for EFS mount targets."
+    Value: !GetAtt EfsSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-EfsSecurityGroupId"
+  FargateServiceSecurityGroupId:
+    Description: "The generic security group for Fargate services."
+    Value: !GetAtt FargateServiceSecurityGroup.GroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-FargateServiceSecurityGroupId"
+  ParamVpnIpv4CidrBlock:
+    Condition: VpnIpv4CidrBlock
+    Description: "The network/VPN IPv4 CIDR block."
+    Value: !Ref ParamVpnIpv4CidrBlock
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamVpnIpv4CidrBlock"
+  ParamPublicApplicationLoadBalancerSecurityGroupId:
+    Description: "The public application load balancer SSM parameter."
+    Value: !Ref ParamPublicApplicationLoadBalancerSecurityGroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamPublicApplicationLoadBalancerSecurityGroupId"
+  ParamEcsHostSecurityGroupId:
+    Description: "The Elastic Container Service host security group SSM parameter."
+    Value: !Ref ParamEcsHostSecurityGroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsHostSecurityGroupId"
+  ParamEfsSecurityGroupId:
+    Description: "The Elastic File System security group SSM parameter."
+    Value: !Ref ParamEfsSecurityGroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEfsSecurityGroupId"
+  ParamFargateServiceSecurityGroupId:
+    Description: "The Fargate service security group SSM parameter."
+    Value: !Ref ParamFargateServiceSecurityGroupId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamFargateServiceSecurityGroupId"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"

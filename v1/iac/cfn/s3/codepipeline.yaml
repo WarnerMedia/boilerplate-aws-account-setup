@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: "2010-09-09" #The Format Version is optional.
+Description: "Set up a central encrypted bucket for storing CodePipeline Zip files (to be used between steps) - (v1.2.1)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  BucketBaseName:
+    Type: "String"
+    Description: "The base name of the CodePipeline bucket."
+    Default: "codepipeline"
+  BucketObjectExpirationInDays:
+    Type: "Number"
+    Description: "The default age of an object before it is automatically deleted from the bucket."
+    Default: 184
+Resources:
+  CodePipelineBucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: "Delete"
+    Properties:
+      BucketName: !Sub "{{resolve:ssm:/account/name}}-${InfrastructureName}-${BucketBaseName}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: "aws:kms"
+            KMSMasterKeyID: !Sub "{{resolve:ssm:/kms/${InfrastructureName}/key/s3/arn}}"
+      LifecycleConfiguration:
+        Rules:
+        - Id: "DefaultObjectMaxAge"
+          Prefix: ""
+          Status: "Enabled"
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: !Ref BucketObjectExpirationInDays
+          ExpirationInDays: !Ref BucketObjectExpirationInDays
+          NoncurrentVersionExpirationInDays: !Ref BucketObjectExpirationInDays
+      LoggingConfiguration:
+        DestinationBucketName: !Sub "{{resolve:ssm:/s3/${InfrastructureName}/bucket/logging/server-access/name}}"
+        LogFilePrefix: !Sub "{{resolve:ssm:/account/name}}-${InfrastructureName}-${BucketBaseName}-${AWS::Region}/"
+      PublicAccessBlockConfiguration:
+        # Block public access to buckets and objects granted through new access control lists (ACLs)
+        BlockPublicAcls: true
+        # Block public access to buckets and objects granted through any access control lists (ACLs)
+        IgnorePublicAcls: true
+        # Block public access to buckets and objects granted through new public bucket or access point policies
+        BlockPublicPolicy: true
+        # Block public and cross-account access to buckets and objects through any public bucket or access point policies
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: "Suspended"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamCodePipelineBucketArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The CodePipeline bucket ARN."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/codepipeline/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt CodePipelineBucket.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamCodePipelineBucketBaseName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The CodePipeline bucket base name."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/codepipeline/base-name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Sub "{{resolve:ssm:/account/name}}-${InfrastructureName}-${BucketBaseName}"
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamCodePipelineBucketName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The CodePipeline bucket name."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/codepipeline/name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref CodePipelineBucket
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  CodePipelineBucketName:
+    Description: "The bucket name."
+    Value: !Ref CodePipelineBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-CodePipelineBucketName"
+  CodePipelineBucketArn:
+    Description: "The bucket ARN."
+    Value: !GetAtt CodePipelineBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-CodePipelineBucketArn"
+  ParamCodePipelineBucketArn:
+    Description: "The Codepipeline bucket ARN SSM parameter."
+    Value: !Ref ParamCodePipelineBucketArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamCodePipelineBucketArn"
+  ParamCodePipelineBucketBaseName:
+    Description: "The CodePipeline bucket base name SSM parameter."
+    Value: !Ref ParamCodePipelineBucketBaseName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamCodePipelineBucketBaseName"
+  ParamCodePipelineBucketName:
+    Description: "The CodePipeline bucket name SSM parameter."
+    Value: !Ref ParamCodePipelineBucketName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamCodePipelineBucketName"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    - Label:
+        default: "Bucket Configuration"
+      Parameters:
+      - BucketBaseName
+      - BucketObjectExpirationInDays
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      BucketBaseName:
+        default: "Bucket Base Name:"
+      BucketObjectExpirationInDays:
+        default: "Default Object Expiration (In Days):"

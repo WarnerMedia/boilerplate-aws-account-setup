@@ -1,0 +1,202 @@
+AWSTemplateFormatVersion: "2010-09-09" #The Format Version is optional.
+Description: "Create a generic KMS Key with an Alias - (v1.0.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  # Key Configuration
+  KeyName:
+    Type: "String"
+    Description: "A name for this key."
+  KeyDescription:
+    Type: "String"
+    Description: "A description for this key."
+  KeyEnabled:
+    Type: "String"
+    Description: "Should this key be enabled?"
+    AllowedValues:
+    - "true"
+    - "false"
+    Default: "true"
+  EnableKeyRotation:
+    Type: "String"
+    Description: "Should key rotation be enabled?"
+    AllowedValues:
+    - "true"
+    - "false"
+    Default: "true"
+  KeyUser:
+    Type: "String"
+    Description: "This is a user ARN that will have full access to this KMS key."
+    Default: ""
+Conditions:
+  KeyUser: !Not [ !Equals [ !Ref KeyUser, "" ] ]
+Resources:
+  Key:
+    Type: "AWS::KMS::Key"
+    Properties:
+      Description: !Ref KeyDescription
+      Enabled: !Ref KeyEnabled
+      EnableKeyRotation: !Ref EnableKeyRotation
+      KeyUsage: "ENCRYPT_DECRYPT"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: !Ref "AWS::StackName"
+        Statement: 
+        - Sid: "Allow Administration of the Key"
+          Effect: "Allow"
+          Principal: 
+            AWS: !If [ KeyUser, !Ref KeyUser, !Sub "arn:aws:iam::${AWS::AccountId}:root" ]
+          Action: 
+          - "kms:Create*"
+          - "kms:Describe*"
+          - "kms:Enable*"
+          - "kms:List*"
+          - "kms:Put*"
+          - "kms:Update*"
+          - "kms:Revoke*"
+          - "kms:Disable*"
+          - "kms:Get*"
+          - "kms:Delete*"
+          - "kms:ScheduleKeyDeletion"
+          - "kms:CancelKeyDeletion"
+          Resource: "*"
+        - Sid: "Allow Use of the Key"
+          Effect: "Allow"
+          Principal: 
+            AWS: !If [ KeyUser, !Ref KeyUser, !Sub "arn:aws:iam::${AWS::AccountId}:root" ]
+          Action: 
+          - "kms:Encrypt"
+          - "kms:Decrypt"
+          - "kms:ReEncrypt*"
+          - "kms:GenerateDataKey*"
+          - "kms:DescribeKey"
+          Resource: "*"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  KeyAlias:
+    Type: "AWS::KMS::Alias"
+    DependsOn: Key
+    Properties:
+      AliasName: !Sub "alias/${KeyName}/${InfrastructureName}"
+      TargetKeyId: !GetAtt Key.Arn
+  # SSM Parameters
+  ParamKeyArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The KMS Key ARN."
+      Name: !Sub "/kms/${InfrastructureName}/key/${KeyName}/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Key.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamKeyId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The KMS Key ID."
+      Name: !Sub "/kms/${InfrastructureName}/key/${KeyName}/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt Key.KeyId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamKeyAlias:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The KMS Key Alias."
+      Name: !Sub "/kms/${InfrastructureName}/key/${KeyName}/alias"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref KeyAlias
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  KeyId:
+    Description: "The KMS Key ID."
+    Value: !Ref Key
+    Export:
+      Name: !Sub "${AWS::StackName}-KeyId"
+  KeyArn:
+    Description: "The KMS Key ARN."
+    Value: !GetAtt Key.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-KeyArn"
+  KeyAlias:
+    Description: "The KMS Key Alias."
+    Value: !Ref KeyAlias
+    Export:
+      Name: !Sub "${AWS::StackName}-KeyAlias"
+  ParamKeyArn:
+    Description: "The KMS Key ARN SSM parameter."
+    Value: !Ref ParamKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamKeyArn"
+  ParamKeyId:
+    Description: "The KMS Key ID SSM parameter."
+    Value: !Ref ParamKeyId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamKeyId"
+  ParamKeyAlias:
+    Description: "The KMS Key Alias SSM parameter."
+    Value: !Ref ParamKeyAlias
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamKeyAlias"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    - Label:
+        default: "Key Configuration"
+      Parameters:
+      - KeyName
+      - KeyDescription
+      - KeyEnabled
+      - EnableKeyRotation
+      - KeyUser
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      KeyName:
+        default: "Key Name:"
+      KeyDescription:
+        default: "Key Description:"
+      KeyEnabled:
+        default: "Key Enabled:"
+      EnableKeyRotation:
+        default: "Enable Key Rotation:"
+      KeyUser:
+        default: "Key User:"

@@ -1,0 +1,100 @@
+AWSTemplateFormatVersion: "2010-09-09" #The Format Version is optional.
+Description: "Create an ACM certificate with Route53 DNS validation (three subject alternative names) - (v1.0.0)."
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  # Certificate Configuration
+  PrimaryDomainName:
+    Type: "String"
+    Description: "Set the primary domain for this certificate (e.g. *.example.com)."
+  SubjectAlternativeNamesList:
+    Type: "CommaDelimitedList"
+    Description: "Set a comma-delimited list of additional domains for this certificate (e.g. *.nonprod.example.com,*.prod.example.com)."
+    Default: ""
+  HostedZoneId:
+    Type: "String"
+    Description: "The Hosted Zone ID for the domain in Route53."
+Resources:
+  Certificate:
+    Type: "AWS::CertificateManager::Certificate"
+    Properties:
+      CertificateTransparencyLoggingPreference: "ENABLED"
+      DomainName: !Ref PrimaryDomainName
+      SubjectAlternativeNames: !Ref SubjectAlternativeNamesList
+      ValidationMethod: "DNS"
+      DomainValidationOptions:
+      - DomainName: !Ref PrimaryDomainName
+        HostedZoneId: !Ref HostedZoneId
+      - DomainName: !Select [ 0, !Ref SubjectAlternativeNamesList ]
+        HostedZoneId: !Ref HostedZoneId
+      - DomainName: !Select [ 1, !Ref SubjectAlternativeNamesList ]
+        HostedZoneId: !Ref HostedZoneId
+      - DomainName: !Select [ 2, !Ref SubjectAlternativeNamesList ]
+        HostedZoneId: !Ref HostedZoneId
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  # Secure Certificate Parameters
+  ParamCertificateArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: !Sub "The \"${InfrastructureName}\" secure certificate ARN."
+      Name: !Sub "/acm/${InfrastructureName}/certificate/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref Certificate
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  CertificateArn:
+    Description: "The ARN for the ACM certificate."
+    Value: !Ref Certificate
+    Export:
+      Name: !Sub "${AWS::StackName}-CertificateArn"
+  ParamCertificateArn:
+    Description: "The ARN for the ACM certificate SSM parameter."
+    Value: !Ref ParamCertificateArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamCertificateArn"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    - Label:
+        default: "Certificate Configuration"
+      Parameters:
+      - PrimaryDomainName
+      - SubjectAlternativeNamesList
+      - HostedZoneId
+    ParameterLabels:
+      # General Configuration
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      # Certificate Configuration
+      PrimaryDomainName:
+        default: "Primary Domain Name:"
+      SubjectAlternativeNamesList:
+        default: "Subject Alternative Names List:"
+      HostedZoneId:
+        default: "Route53 Hosted Zone ID:"

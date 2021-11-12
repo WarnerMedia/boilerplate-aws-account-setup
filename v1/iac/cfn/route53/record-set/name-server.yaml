@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: "2010-09-09" #The Format Version is optional.
+Description: "Create a new Route53 name server (NS) record - (v1.0.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  DomainName:
+    Type: "String"
+    Description: "The domain name for the name server entry."
+  NameServerList:
+    Type: "CommaDelimitedList"
+    Description: "A comma-separated list of name servers."
+  TimeToLive:
+    Type: "Number"
+    Description: "The time-to-live for this record set (in seconds)."
+    Default: 3600
+Resources:
+  Record:
+    Type: "AWS::Route53::RecordSet"
+    Properties:
+      HostedZoneId: !Sub "{{resolve:ssm:/route53/${InfrastructureName}/hosted-zone/id}}"
+      Comment: !Sub "Name servers for the \"${DomainName}\" domain name."
+      Name: !Ref DomainName
+      Type: "NS"
+      TTL: !Ref TimeToLive
+      ResourceRecords: !Ref NameServerList
+Outputs:
+  Record:
+    Description: "The name server domain name."
+    Value: !Ref Record
+    Export:
+      Name: !Sub "${AWS::StackName}-Record"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    - Label:
+        default: "Record Configuration"
+      Parameters:
+      - DomainName
+      - NameServerList
+      - TimeToLive
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      DomainName:
+        default: "Domain Name:"
+      NameServerList:
+        default: "Name Server List:"
+      TimeToLive:
+        default: "Time to Live (in Seconds):"

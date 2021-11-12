@@ -1,0 +1,77 @@
+AWSTemplateFormatVersion: "2010-09-09" #The Format Version is optional.
+Description: "Create a new public Route53 Hosted Zone - (v1.0.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  HostedZoneName:
+    Type: "String"
+    Description: "The domain name for this hosted zone (e.g. nonprod.example.com or example.com)"
+  HostedZoneComment:
+    Type: "String"
+    Description: "A comment to help describe this hosted zone."
+    Default: "Public hosted zone."
+Resources:
+  HostedZone:
+    Type: "AWS::Route53::HostedZone"
+    Properties:
+      Name: !Ref HostedZoneName
+      HostedZoneConfig:
+        Comment: !Ref HostedZoneComment
+      HostedZoneTags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamHostedZoneId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ID of the hosted zone."
+      Name: !Sub "/route53/${InfrastructureName}/hosted-zone/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref HostedZone
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  HostedZoneId:
+    Description: "The ID of the hosted zone."
+    Value: !Ref HostedZone
+    Export:
+      Name: !Sub "${AWS::StackName}-HostedZoneId"
+  ParamHostedZoneId:
+    Description: "The hosted zone ID SSM parameter."
+    Value: !Ref ParamHostedZoneId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamHostedZoneId"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "Bucket Configuration"
+      Parameters:
+      - InfrastructureName
+      - HostedZoneName
+      - HostedZoneComment
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      HostedZoneName:
+        default: "Hosted Zone Name:"
+      HostedZoneComment:
+        default: "Hosted Zone Comment:"

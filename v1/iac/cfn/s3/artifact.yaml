@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: "2010-09-09" #The Format Version is optional.
+Description: "Set up a central encrypted bucket for storing build artifact files (to be used between builds) or build caching) - (v1.0.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+  BucketObjectExpirationInDays:
+    Type: "Number"
+    Description: "The default age of an non-current or incomplete multi-part upload object before it is automatically deleted from the bucket."
+    Default: 90
+  ExternalAccountId:
+    Type: "String"
+    Description: "An external account which should have access to this artifact bucket."
+    Default: ""
+Conditions:
+  ExternalAccountId: !Not [ !Equals [ !Ref ExternalAccountId, "" ] ]
+Resources:
+  ArtifactBucket:
+    Type: "AWS::S3::Bucket"
+    DeletionPolicy: "Delete"
+    Properties:
+      BucketName: !Sub
+      - "${AccountName}-${InfrastructureName}-artifact-${AWS::Region}"
+      - AccountName: "{{resolve:ssm:/account/name}}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: "aws:kms"
+            KMSMasterKeyID: !Sub "{{resolve:ssm:/kms/${InfrastructureName}/key/s3/arn}}"
+      LifecycleConfiguration:
+        Rules:
+        - Id: "DefaultObjectMaxAge"
+          Prefix: ""
+          Status: "Enabled"
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: !Ref BucketObjectExpirationInDays
+          NoncurrentVersionExpirationInDays: !Ref BucketObjectExpirationInDays
+      LoggingConfiguration:
+        DestinationBucketName: !Sub "{{resolve:ssm:/s3/${InfrastructureName}/bucket/logging/server-access/name}}"
+        LogFilePrefix: !Sub
+        - "${AccountName}-${InfrastructureName}-artifact-${AWS::Region}/"
+        - AccountName: "{{resolve:ssm:/account/name}}"
+      PublicAccessBlockConfiguration:
+        # Block public access to buckets and objects granted through new access control lists (ACLs)
+        BlockPublicAcls: true
+        # Block public access to buckets and objects granted through any access control lists (ACLs)
+        IgnorePublicAcls: true
+        # Block public access to buckets and objects granted through new public bucket or access point policies
+        BlockPublicPolicy: true
+        # Block public and cross-account access to buckets and objects through any public bucket or access point policies
+        RestrictPublicBuckets: false
+      VersioningConfiguration:
+        Status: "Enabled"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ArtifactBucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Condition: ExternalAccountId
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Id: !Ref ArtifactBucket
+        Statement:
+        - Sid: "DelegateS3Access"
+          Effect: "Allow"
+          Principal:
+            AWS:
+            - !Sub "arn:aws:iam::${ExternalAccountId}:root"
+          Action:
+          - "s3:AbortMultipartUpload"
+          - "s3:GetObject"
+          - "s3:GetObjectAcl"
+          - "s3:GetObjectVersion"
+          - "s3:PutObject"
+          - "s3:PutObjectAcl"
+          Resource:
+          - !Sub "arn:aws:s3:::${ArtifactBucket}/*"
+          - !Sub "arn:aws:s3:::${ArtifactBucket}"
+  ParamArtifactBucketName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The artifact bucket name."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/artifact/name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref ArtifactBucket
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamArtifactBucketArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The artifact bucket ARN."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/artifact/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt ArtifactBucket.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  ArtifactBucketName:
+    Description: "The bucket name."
+    Value: !Ref ArtifactBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-ArtifactBucketName"
+  ArtifactBucketArn:
+    Description: "The bucket ARN."
+    Value: !GetAtt ArtifactBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-ArtifactBucketArn"
+  ParamArtifactBucketName:
+    Description: "The artifact bucket name SSM parameter."
+    Value: !Ref ParamArtifactBucketName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamArtifactBucketName"
+  ParamArtifactBucketArn:
+    Description: "The artifact bucket ARN SSM parameter."
+    Value: !Ref ParamArtifactBucketArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamArtifactBucketArn"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "Bucket Configuration"
+      Parameters:
+      - InfrastructureName
+      - BucketObjectExpirationInDays
+      - ExternalAccountId
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      BucketObjectExpirationInDays:
+        default: "Default Object Expiration (In Days):"
+      ExternalAccountId:
+        default: "External Account ID:"

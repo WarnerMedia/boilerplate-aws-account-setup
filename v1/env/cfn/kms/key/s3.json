@@ -1,0 +1,6 @@
+{
+  "Parameters": {
+    "KeyName": "s3",
+    "KeyDescription": "Encryption key for S3 buckets."
+  }
+}

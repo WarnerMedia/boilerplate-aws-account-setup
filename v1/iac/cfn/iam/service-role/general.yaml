@@ -1,0 +1,471 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create a number of base IAM service roles - (v1.0.0)"
+Parameters:
+  # General Configuration
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+Resources:
+  BastionInstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      ManagedPolicyArns:
+      - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+      Path: "/"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  BastionInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    DependsOn: BastionInstanceRole
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: BastionInstanceRole
+  EcsServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "ecs.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      ManagedPolicyArns:
+      - "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  EcsServiceAutoScalingRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "application-autoscaling.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      Policies:
+      - PolicyName: !Sub "${AWS::StackName}-service-autoscaling"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+            - "application-autoscaling:*"
+            - "cloudwatch:DescribeAlarms"
+            - "cloudwatch:PutMetricAlarm"
+            - "ecs:DescribeServices"
+            - "ecs:UpdateService"
+            Resource: "*"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  EcsServerRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "ec2.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      ManagedPolicyArns:
+      - "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+      - "arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM"
+      - "arn:aws:iam::aws:policy/AmazonElasticFileSystemFullAccess"
+      Path: "/"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+      - Key: "customer"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+      - Key: "environment"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+      - Key: "team"
+        Value: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  EcsServerInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    DependsOn: EcsServerRole
+    Properties:
+      Path: "/"
+      Roles:
+      - Ref: EcsServerRole
+  # SSM Parameters
+  ParamBastionInstanceRoleId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ID for a role that can be used by bastion hosts."
+      Name: !Sub "/iam/${InfrastructureName}/role/instance/bastion/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref BastionInstanceRole
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamBastionInstanceRoleArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ARN for a role that can be used by bastion hosts."
+      Name: !Sub "/iam/${InfrastructureName}/role/instance/bastion/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt BastionInstanceRole.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamBastionInstanceProfileId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ID of the bastion instance profile."
+      Name: !Sub "/iam/${InfrastructureName}/profile/instance/bastion/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref BastionInstanceProfile
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamBastionInstanceProfileArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ARN of the bastion instance profile."
+      Name: !Sub "/iam/${InfrastructureName}/profile/instance/bastion/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt BastionInstanceProfile.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServiceRoleId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ID of the ECS service role."
+      Name: !Sub "/iam/${InfrastructureName}/role/ecs/service/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref EcsServiceRole
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServiceRoleArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ARN of the ECS service role."
+      Name: !Sub "/iam/${InfrastructureName}/role/ecs/service/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt EcsServiceRole.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServiceAutoScalingRoleId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ID of a role needed for cluster auto-scaling."
+      Name: !Sub "/iam/${InfrastructureName}/role/ecs/service/auto-scaling/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref EcsServiceAutoScalingRole
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServiceAutoScalingRoleArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ARN of a role needed for cluster auto-scaling."
+      Name: !Sub "/iam/${InfrastructureName}/role/ecs/service/auto-scaling/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt EcsServiceAutoScalingRole.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServerRoleId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ID of a role needed by the ECS cluster instances."
+      Name: !Sub "/iam/${InfrastructureName}/role/ecs/server/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref EcsServerRole
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServerRoleArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The role ARN needed by the ECS cluster instances."
+      Name: !Sub "/iam/${InfrastructureName}/role/ecs/server/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt EcsServerRole.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServerInstanceProfileId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ID for the ECS server instance profile."
+      Name: !Sub "/iam/${InfrastructureName}/profile/ecs/server/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref EcsServerInstanceProfile
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+  ParamEcsServerInstanceProfileArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The ARN for the ECS server instance profile."
+      Name: !Sub "/iam/${InfrastructureName}/profile/ecs/server/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt EcsServerInstanceProfile.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/customer}}"
+        contact-email: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/contact-email}}"
+        environment: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/environment}}"
+        team: !Sub "{{resolve:ssm:/account/${InfrastructureName}/tag/team}}"
+Outputs:
+  BastionInstanceRoleId:
+    Description: "The role needed by the bastion instances."
+    Value: !Ref BastionInstanceRole
+    Export:
+      Name: !Sub "${AWS::StackName}-BastionInstanceRoleId"
+  BastionInstanceRoleArn:
+    Description: "The role ARN needed by the bastion instances."
+    Value: !GetAtt BastionInstanceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BastionInstanceArn"
+  BastionInstanceProfileId:
+    Description: "The ID of the bastion instance profile."
+    Value: !Ref BastionInstanceProfile
+    Export:
+      Name: !Sub "${AWS::StackName}-BastionInstanceProfileId"
+  BastionInstanceProfileArn:
+    Description: "The ARN of the bastion instance profile."
+    Value: !GetAtt BastionInstanceProfile.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BastionInstanceProfileArn"
+  EcsServiceRoleId:
+    Description: "The role needed by ECS cluster services."
+    Value: !Ref EcsServiceRole
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServiceRoleId"
+  EcsServiceRoleArn:
+    Description: "The role ARN needed by ECS cluster services."
+    Value: !GetAtt EcsServiceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServiceRoleArn"
+  EcsServiceAutoScalingRoleId:
+    Description: "The ID of a role needed by ECS cluster services."
+    Value: !Ref EcsServiceAutoScalingRole
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServiceAutoScalingRoleId"
+  EcsServiceAutoScalingRoleArn:
+    Description: "The role ARN needed by ECS cluster services."
+    Value: !GetAtt EcsServiceAutoScalingRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServiceAutoScalingRoleArn"
+  EcsServerRoleId:
+    Description: "The ID of a role needed by the ECS cluster instances."
+    Value: !Ref EcsServerRole
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServerRoleId"
+  EcsServerRoleArn:
+    Description: "The role ARN needed by the ECS cluster instances."
+    Value: !GetAtt EcsServerRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServerRoleArn"
+  EcsServerInstanceProfileId:
+    Description: "The ID for the ECS server instance profile."
+    Value: !Ref EcsServerInstanceProfile
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServerInstanceProfileId"
+  EcsServerInstanceProfileArn:
+    Description: "The ARN for the ECS server instance profile."
+    Value: !GetAtt EcsServerInstanceProfile.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-EcsServerInstanceProfileArn"
+  ParamBastionInstanceRoleId:
+    Description: "The ID for a role that can be used by bastion hosts SSM Parameter."
+    Value: !Ref ParamBastionInstanceRoleId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamBastionInstanceRoleId"
+  ParamBastionInstanceRoleArn:
+    Description: "The ARN for a role that can be used by bastion host SSM Parameters."
+    Value: !Ref ParamBastionInstanceRoleArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamBastionInstanceRoleArn"
+  ParamBastionInstanceProfileId:
+    Description: "The ID of the bastion instance profile SSM Parameter."
+    Value: !Ref ParamBastionInstanceProfileId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamBastionInstanceProfileId"
+  ParamBastionInstanceProfileArn:
+    Description: "The ARN of the bastion instance profile SSM Parameter."
+    Value: !Ref ParamBastionInstanceProfileArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamBastionInstanceProfileArn"
+  ParamEcsServiceRoleId:
+    Description: "The ID of the ECS service role SSM Parameter."
+    Value: !Ref ParamEcsServiceRoleId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServiceRoleId"
+  ParamEcsServiceRoleArn:
+    Description: "The ARN of the ECS service role SSM Parameter."
+    Value: !Ref ParamEcsServiceRoleArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServiceRoleArn"
+  ParamEcsServiceAutoScalingRoleId:
+    Description: "The ID of a role needed for cluster auto-scaling SSM Parameter."
+    Value: !Ref ParamEcsServiceAutoScalingRoleId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServiceAutoScalingRoleId"
+  ParamEcsServiceAutoScalingRoleArn:
+    Description: "The ARN of a role needed for cluster auto-scaling SSM Parameter."
+    Value: !Ref ParamEcsServiceAutoScalingRoleArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServiceAutoScalingRoleArn"
+  ParamEcsServerRoleId:
+    Description: "The ID of a role needed by the ECS cluster instances SSM Parameter."
+    Value: !Ref ParamEcsServerRoleId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServerRoleId"
+  ParamEcsServerRoleArn:
+    Description: "The role ARN needed by the ECS cluster instances SSM Parameter."
+    Value: !Ref ParamEcsServerRoleArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServerRoleArn"
+  ParamEcsServerInstanceProfileId:
+    Description: "The ID for the ECS server instance profile SSM Parameter."
+    Value: !Ref ParamEcsServerInstanceProfileId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServerInstanceProfileId"
+  ParamEcsServerInstanceProfileArn:
+    Description: "The ARN for the ECS server instance profile SSM Parameter."
+    Value: !Ref ParamEcsServerInstanceProfileArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamEcsServerInstanceProfileArn"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - InfrastructureName
+    ParameterLabels:
+      InfrastructureName:
+        default: "Infrastructure Name:"

@@ -1,0 +1,1358 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create the setup CodePipeline - (v1.1.0)"
+Parameters:
+  # General Configuration
+  SuggestedStackName:
+    Type: "String"
+    Description: "This is the suggested name for this stack.  If using the console, you can copy and paste this into the stack name field."
+    Default: "main-account-setup"
+  InfrastructureName:
+    Type: "String"
+    Description: "A name used to differentiate this infrastructure from other existing infrastructure."
+    Default: "main"
+  # AWS Account Configuration
+  AwsAccountName:
+    Type: "String"
+    Description: "What is the name used for this AWS account (the account name that appears in the console)?"
+  ExternalAccountId:
+    Type: "String"
+    Description: "An external account which should have access to certain resources in this account."
+    Default: ""
+  # Domain Configuration
+  CreateDomainNameHostedZone:
+    Type: "String"
+    Description: "Do we need to create a global hosted zone in Route53?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "Yes"
+  HostedZoneDomainName:
+    Type: "String"
+    Description: "What is the primary domain name that we will be using with this infrastructure (e.g. example.com)?"
+  ExistingHostedZoneId:
+    Type: "String"
+    Description: "If a Route53 Hosted Zone already exists, please put the value in this field and answer \"No\" to creating a new domain."
+    Default: ""
+  NonProdNameServerDomains:
+    Type: "String"
+    Description: "If you are using a split account and already created a hosted zone in the non-prod account, what are the name servers for the non-prod DNS entries? (e.g. ns-123.awsdns-45.com,ns-1234.awsdns-56.org, etc.)"
+    Default: ""
+  NonProdDomainName:
+    Type: "String"
+    Description: "If you are using a split account and already created a hosted zone in the non-prod account, what is the primary domain name used in the non-prod account (e.g. nonprod.example.com)?"
+    Default: ""
+  # Secure Certificate Configuration
+  CreateSecureCertificate:
+    Type: "String"
+    Description: "Do we need to create a secure certificate to be used with the hosted zone domain?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "No"
+  SecureCertificatePrimaryDomain:
+    Type: "String"
+    Description: "If a secure certificate needs to be created, what is the primary domain for the certificate (e.g. *.example.com)?"
+  SecureCertificateAlternateDomainCount:
+    Type: "String"
+    Description: "If we need to cover more than the primary domain, how many domains will be added to the certificate?"
+    AllowedValues:
+    - "0"
+    - "1"
+    - "2"
+    - "3"
+    - "4"
+    - "5"
+    - "6"
+    - "7"
+    Default: "0"
+  SecureCertificateAlternateDomains:
+    Type: "String"
+    Description: "This is a comma-separated list of domains to be added to the secure certificate.  It generally will need to match the number of domains in the previous field (e.g. If 2 additional domains was selected then, this list should be something like \"*.dev.example.com,*.qa.example.com\").  There is one exception with second-level domains."
+    Default: ""
+  ExistingSecureCertificateArn:
+    Type: "String"
+    Description: "If a secure certificate already exists, please put the value in this field and answer \"No\" to creating a new secure certificate."
+    Default: ""
+  # VPC Configuration
+  RegionUse:
+    Type: "String"
+    Description: "Are we using the current region as the primary (region where global or single-region resources will be managed), secondary (region where we replicate to or set up multi-region resources in), or tertiary (generally speaking, the backup/testing region)?"
+    AllowedValues:
+    - "primary"
+    - "secondary"
+    - "tertiary"
+    Default: "primary"
+  VpnIpv4CidrBlock:
+    Type: "String"
+    Description: "DEPRECATED: Here for backwards compatibility, replaced by \"AllowedCidrBlockList\".  What is the IPv4 CIDR block of the network/VPN that needs access to this VPC (e.g. 203.0.113.0/24)?"
+    Default: ""
+  AllowedCidrBlockList:
+    Type: "CommaDelimitedList"
+    Description: "A list of the default CIDR blocks that are allowed to reach this infrastructure, for things like VPN access. (e.g. 198.51.100.0/24,203.0.113.0/24,2001:DB8::/32)."
+    Default: "0.0.0.0/0,::/0"
+  CreateBastion:
+    Type: "String"
+    Description: "Should a bastion instance be created?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "No"
+  KeyPair:
+    Type: "String"
+    Description: "If we are creating a bastion instance, what EC2 key pair name should be used (must be created in the console: https://us-east-2.console.aws.amazon.com/ec2/v2/home?region=us-east-2#KeyPairs:)?"
+    Default: ""
+  EnableVpcIpv6:
+    Type: "String"
+    Description: "Should IPv6 be enabled for this VPC (some regions don't support it, like any regions in China)?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "Yes"
+  # Bucket Configuration
+  BucketObjectExpirationInDays:
+    Type: "Number"
+    Description: "The default age of an object before it is automatically deleted from the bucket."
+    Default: 32
+  DeploymentObjectKey:
+    Type: "String"
+    Description: "The object key to copy the current source files to."
+    Default: "artifact/infrastructure.zip"
+  # CodePipeline Configuration
+  CloudFormationCapabilities:
+    Type: "String"
+    Description: "A list of the capabilities that CloudFormation should have when executing stacks via CodePipeline."
+    Default: "CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND"
+  AppBaseFolder:
+    Type: "String"
+    Description: "The base repository folder for the application."
+    Default: "v1"
+  ActionMode:
+    Type: "String"
+    Description: "The CodePipeline CloudFormation stack action mode."
+    AllowedValues:
+    - "CHANGE_SET_EXECUTE"
+    - "CHANGE_SET_REPLACE"
+    - "CREATE_UPDATE"
+    - "DELETE_ONLY"
+    - "REPLACE_ON_FAILURE"
+    Default: "REPLACE_ON_FAILURE"
+  # Source Configuration
+  CodePipelineGitHubOrganization:
+    Type: "String"
+    Description: "What is the GitHub user or organization of this repository (must be updated to your copy of the template repository)?"
+    Default: "warnermediacode"
+  CodePipelineSourceRepository:
+    Type: "String"
+    Description: "What is the name of this GitHub repository (must be updated to your copy of the template repository)?"
+    Default: "boilerplate-aws-account-setup"
+  CodePipelineSourceBranch:
+    Type: "String"
+    Description: "What is the primary branch name of the GitHub repository?"
+    Default: "main"
+  # DockerHub Configuration
+  DockerHubUsername:
+    Type: "String"
+    Description: "The DockerHub account username."
+    NoEcho: true
+  #NOTE: The "DockerHubToken" parameter should never have a default value, it should be filled in when the template is executed.
+  DockerHubToken:
+    Type: "String"
+    Description: "The DockerHub account token."
+    NoEcho: true
+  # GitHub Configuration
+  # NOTE: The "GitHubOAuthToken" parameter should never have a default value, it should be filled in when the template is executed.
+  GitHubOAuthToken:
+    Type: "String"
+    Description: "This is the GitHub service account OAuth token which grants access to the source repository."
+    NoEcho: true
+  GitHubServiceAccountName:
+    Type: "String"
+    Description: "What is the account name of the service account user that the GitHub OAuth token is linked to?"
+  GitHubServiceAccountId:
+    Type: "String"
+    Description: "What is the account ID of the service account user that the GitHub OAuth token is linked to? Use \"https://api.github.com/users/<your github user name>\" to get the account ID."
+  CreateGitHubSourceCredential:
+    Type: "String"
+    Description: "Create GitHub CodeBuild source credential for this region (used by all CodeBuilds for GitHub interactions)?"
+    AllowedValues:
+    - "Yes"
+    - "No"
+    Default: "Yes"
+  # KMS Key Configuration
+  KeyEnabled:
+    Type: "String"
+    Description: "Should this key be enabled?"
+    AllowedValues:
+    - "true"
+    - "false"
+    Default: "true"
+  EnableKeyRotation:
+    Type: "String"
+    Description: "Should key rotation be enabled?"
+    AllowedValues:
+    - "true"
+    - "false"
+    Default: "true"
+  # Tags
+  TagCustomer:
+    Type: "String"
+    Description: "If this account is for a specific corporate customer, which customer?  Otherwise, you can put your company name."
+  TagEmailAddress:
+    Type: "String"
+    Description: "What is the e-mail address of the individual or team that is managing this infrastructure?  This could be something like a support e-mail address."
+  TagEnvironment:
+    Type: "String"
+    Description: "What kind of AWS account are we setting up?  If this is a non-production/production split account setup, is this the \"nonprod\" or \"prod\" account.  Otherwise, if this is a single account that will hold everything, then this is a \"single\" account."
+    AllowedValues:
+    - "nonprod"
+    - "prod"
+    - "single"
+    Default: "nonprod"
+  TagTeam:
+    Type: "String"
+    Description: "What is the name of the team that is managing this infrastructure?"
+Conditions:
+  AppBaseFolder: !Not [ !Equals [ !Ref AppBaseFolder, "" ] ]
+  ExistingDomainNameHostedZone: !Not [ !Equals [ !Ref ExistingHostedZoneId, "" ] ]
+  ExistingSecureCertificateArn: !Not [ !Equals [ !Ref ExistingSecureCertificateArn, "" ] ]
+Resources:
+  InfrastructureKey:
+    Type: "AWS::KMS::Key"
+    Properties:
+      Description: !Sub "Account level encryption for the \"${InfrastructureName}\" infrastructure."
+      Enabled: !Ref KeyEnabled
+      EnableKeyRotation: !Ref EnableKeyRotation
+      KeyUsage: "ENCRYPT_DECRYPT"
+      KeyPolicy:
+        Version: "2012-10-17"
+        Id: !Ref AWS::StackName
+        Statement: 
+        - Sid: "Allow Administration of the Key"
+          Effect: "Allow"
+          Principal: 
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          Action: 
+          - "kms:Create*"
+          - "kms:Describe*"
+          - "kms:Enable*"
+          - "kms:List*"
+          - "kms:Put*"
+          - "kms:Update*"
+          - "kms:Revoke*"
+          - "kms:Disable*"
+          - "kms:Get*"
+          - "kms:Delete*"
+          - "kms:ScheduleKeyDeletion"
+          - "kms:CancelKeyDeletion"
+          Resource: "*"
+        - Sid: "Allow Use of the Key"
+          Effect: "Allow"
+          Principal: 
+            AWS: !Sub "arn:aws:iam::${AWS::AccountId}:root"
+          Action: 
+          - "kms:Encrypt"
+          - "kms:Decrypt"
+          - "kms:ReEncrypt*"
+          - "kms:GenerateDataKey*"
+          - "kms:DescribeKey"
+          Resource: "*"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  InfrastructureKeyAlias:
+    Type: "AWS::KMS::Alias"
+    DependsOn: InfrastructureKey
+    Properties:
+      AliasName: !Sub "alias/account/${InfrastructureName}"
+      TargetKeyId: !GetAtt InfrastructureKey.Arn
+  SetupBucket:
+    Type: "AWS::S3::Bucket"
+    DependsOn: InfrastructureKey
+    DeletionPolicy: "Delete"
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+        - ServerSideEncryptionByDefault:
+            SSEAlgorithm: "aws:kms"
+            KMSMasterKeyID: !GetAtt InfrastructureKey.Arn
+      LifecycleConfiguration:
+        Rules:
+        - Id: "DefaultObjectMaxAge"
+          Prefix: ""
+          Status: "Enabled"
+          AbortIncompleteMultipartUpload:
+            DaysAfterInitiation: !Ref BucketObjectExpirationInDays
+          ExpirationInDays: !Ref BucketObjectExpirationInDays
+          NoncurrentVersionExpirationInDays: !Ref BucketObjectExpirationInDays
+      PublicAccessBlockConfiguration:
+        # Block public access to buckets and objects granted through new access control lists (ACLs)
+        BlockPublicAcls: true
+        # Block public access to buckets and objects granted through any access control lists (ACLs)
+        IgnorePublicAcls: true
+        # Block public access to buckets and objects granted through new public bucket or access point policies
+        BlockPublicPolicy: true
+        # Block public and cross-account access to buckets and objects through any public bucket or access point policies
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: "Enabled"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  SetupServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+        - Effect: "Allow"
+          Principal:
+            Service:
+            - "cloudformation.amazonaws.com"
+            - "codepipeline.amazonaws.com"
+          Action:
+          - "sts:AssumeRole"
+      Policies:
+      - PolicyName: "SetupServiceRole"
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: "Allow"
+            Action:
+            - "iam:AttachRolePolicy"
+            - "iam:CreateRole"
+            - "iam:CreateServiceLinkedRole"
+            - "iam:DeleteRole"
+            - "iam:DeleteRolePermissionsBoundary"
+            - "iam:DeleteRolePolicy"
+            - "iam:DeleteServiceLinkedRole"
+            - "iam:DetachRolePolicy"
+            - "iam:GetRole"
+            - "iam:GetRolePolicy"
+            - "iam:GetServiceLinkedRoleDeletionStatus"
+            - "iam:ListAttachedRolePolicies"
+            - "iam:ListInstanceProfilesForRole"
+            - "iam:ListRolePolicies"
+            - "iam:ListRoleTags"
+            - "iam:PassRole"
+            - "iam:PutRolePermissionsBoundary"
+            - "iam:PutRolePolicy"
+            - "iam:TagRole"
+            - "iam:UntagRole"
+            - "iam:UpdateAssumeRolePolicy"
+            - "iam:UpdateRole"
+            - "iam:UpdateRoleDescription"
+            Resource: "*"
+          - Effect: "Allow"
+            Action:
+            - "kms:GenerateDataKey"
+            - "kms:Decrypt"
+            Resource: !GetAtt InfrastructureKey.Arn
+      ManagedPolicyArns:
+      - "arn:aws:iam::aws:policy/AWSCloudFormationFullAccess"
+      - "arn:aws:iam::aws:policy/AWSCodePipeline_FullAccess"
+      - "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+      - "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  # AWS Account Parameters
+  ParamAwsAccountId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The AWS account ID."
+      Name: "/account/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref "AWS::AccountId"
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamAwsAccountName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The AWS account name."
+      Name: "/account/name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref AwsAccountName
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamAwsAccountRegion:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The AWS account region."
+      Name: "/account/region"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref "AWS::Region"
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # External Account Parameters
+  ParamExternalAccountId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The external account ID."
+      Name: !Sub "/account/${InfrastructureName}/external/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref ExternalAccountId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # Account CIDR Block Parameters
+  ParamAllowedCidrBlocks:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "A sting of allowed CIDR blocks for this infrastructure (mixed IPv4 and IPv6)."
+      Name: !Sub "/account/${InfrastructureName}/cidr-block/allowed/all"
+      Tier: "Standard"
+      Type: "String"
+      Value:
+        Fn::Join: [ ",", !Ref AllowedCidrBlockList ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamAllowedCidrBlockList:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "A list of allowed CIDR blocks for this infrastructure (mixed IPv4 and IPv6)."
+      Name: !Sub "/account/${InfrastructureName}/cidr-block/allowed/list"
+      Tier: "Standard"
+      Type: "StringList"
+      Value:
+        Fn::Join: [ ",", !Ref AllowedCidrBlockList ]
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # GitHub Parameters
+  ParamGitHubServiceAccountName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The GitHub service account username."
+      Name: !Sub "/account/${InfrastructureName}/github/service/username"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref GitHubServiceAccountName
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamGitHubServiceAccountId:
+    Type: "AWS::SSM::Parameter"
+    Properties: 
+      DataType: "text"
+      Description: "The GitHub service account ID."
+      Name: !Sub "/account/${InfrastructureName}/github/service/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref GitHubServiceAccountId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # Infrastructure Parameters
+  ParamInfrastructureKmsKeyArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The infrastructure KMS Key ARN."
+      Name: !Sub "/kms/${InfrastructureName}/key/infrastructure/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt InfrastructureKey.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamInfrastructureKmsKeyId:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The infrastructure KMS Key ID."
+      Name: !Sub "/kms/${InfrastructureName}/key/infrastructure/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt InfrastructureKey.KeyId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamInfrastructureKeyAliasName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The infrastructure KMS Key Alias."
+      Name: !Sub "/kms/${InfrastructureName}/key/infrastructure/alias"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref InfrastructureKeyAlias
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamSetupBucketName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The setup bucket name."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/setup/name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref SetupBucket
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamSetupBucketArn:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The setup bucket ARN."
+      Name: !Sub "/s3/${InfrastructureName}/bucket/setup/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !GetAtt SetupBucket.Arn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # Domain Parameters
+  ParamHostedZoneDomainName:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The hosted zone domain name."
+      Name: !Sub "/route53/${InfrastructureName}/hosted-zone/domain-name"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref HostedZoneDomainName
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamExistingHostedZoneId:
+    Type: "AWS::SSM::Parameter"
+    Condition: ExistingDomainNameHostedZone
+    Properties:
+      DataType: "text"
+      Description: "The existing hosted zone ID."
+      Name: !Sub "/route53/${InfrastructureName}/hosted-zone/id"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref ExistingHostedZoneId
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # Secure Certificate Parameters
+  ParamExistingSecureCertificateArn:
+    Type: "AWS::SSM::Parameter"
+    Condition: ExistingSecureCertificateArn
+    Properties:
+      DataType: "text"
+      Description: "The existing secure certificate ARN."
+      Name: !Sub "/acm/${InfrastructureName}/certificate/arn"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref ExistingSecureCertificateArn
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # Tag Parameters
+  ParamTagContactEmail:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The contact e-mail tag."
+      Name: !Sub "/account/${InfrastructureName}/tag/contact-email"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref TagEmailAddress
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamTagCustomer:
+    Type: "AWS::SSM::Parameter"
+    Properties: 
+      DataType: "text"
+      Description: "The customer tag."
+      Name: !Sub "/account/${InfrastructureName}/tag/customer"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref TagCustomer
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamTagEnvironment:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The environment tag."
+      Name: !Sub "/account/${InfrastructureName}/tag/environment"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref TagEnvironment
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  ParamTagTeam:
+    Type: "AWS::SSM::Parameter"
+    Properties:
+      DataType: "text"
+      Description: "The team tag."
+      Name: !Sub "/account/${InfrastructureName}/tag/team"
+      Tier: "Standard"
+      Type: "String"
+      Value: !Ref TagTeam
+      Tags:
+        Name: !Ref "AWS::StackName"
+        application: !Ref "AWS::StackName"
+        customer: !Ref TagCustomer
+        contact-email: !Ref TagEmailAddress
+        environment: !Ref TagEnvironment
+        team: !Ref TagTeam
+  # Infrastructure Secrets
+  AccountSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: "account"
+      KmsKeyId: !Ref InfrastructureKeyAlias
+      Description: "General AWS account information.  Though these aren't really secrets, useful to have them available in this format."
+      SecretString: !Sub '{"id": "${AWS::AccountId}","name": "${AwsAccountName}","region": "${AWS::Region}"}'
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "application"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  GitHubSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: !Sub "account/${InfrastructureName}/github"
+      KmsKeyId: !Ref InfrastructureKeyAlias
+      Description: !Sub "General GitHub secrets for the \"${InfrastructureName}\" infrastructure."
+      SecretString: !Sub '{"oAuthToken": "${GitHubOAuthToken}","serviceAccountName": "${GitHubServiceAccountName}","serviceAccountId": "${GitHubServiceAccountId}"}'
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "application"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  DockerHubSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: !Sub "account/${InfrastructureName}/dockerhub"
+      KmsKeyId: !Ref InfrastructureKeyAlias
+      Description: !Sub "General DockerHub secrets for the \"${InfrastructureName}\" infrastructure."
+      SecretString: !Sub '{"username": "${DockerHubUsername}","token": "${DockerHubToken}"}'
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "application"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  InfrastructureSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: !Sub "account/${InfrastructureName}/setup"
+      KmsKeyId: !Ref InfrastructureKeyAlias
+      Description: !Sub "General setup/infrastructure secrets for the \"${InfrastructureName}\" infrastructure."
+      SecretString: !Sub '{"infrastructureKmsKeyArn": "${InfrastructureKey.Arn}","infrastructureKmsKeyId": "${InfrastructureKey.KeyId}","infrastructureKmsKeyAlias": "${InfrastructureKeyAlias}","setupBucketName": "${SetupBucket}","setupBucketArn": "${SetupBucket.Arn}","externalAccountId": "${ExternalAccountId}","hostedZoneDomainName": "${HostedZoneDomainName}"}'
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "application"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  TagsSecret:
+    Type: "AWS::SecretsManager::Secret"
+    Properties:
+      Name: !Sub "account/${InfrastructureName}/tags"
+      KmsKeyId: !Ref InfrastructureKeyAlias
+      Description: !Sub "General tags for the \"${InfrastructureName}\" infrastructure."
+      SecretString: !Sub '{"contact-email": "${TagEmailAddress}","customer": "${TagCustomer}","environment": "${TagEnvironment}","team": "${TagTeam}"}'
+      Tags:
+      - Key: "Name"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "application"
+        Value: !Sub "${AWS::StackName}"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  SetupCodePipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      RoleArn: !GetAtt SetupServiceRole.Arn
+      Name: !Sub "${InfrastructureName}-account-setup"
+      RestartExecutionOnUpdate: true
+      ArtifactStores:
+      - Region: !Ref "AWS::Region"
+        ArtifactStore:
+          Type: "S3"
+          Location: !Ref SetupBucket
+      Stages:
+      - Name: "Source"
+        Actions:
+        - Name: "GitHub_Source"
+          ActionTypeId:
+            Category: "Source"
+            Owner: "ThirdParty"
+            Provider: "GitHub"
+            Version: "1"
+          Configuration:
+            Owner: !Ref CodePipelineGitHubOrganization
+            Repo: !Ref CodePipelineSourceRepository
+            Branch: !Ref CodePipelineSourceBranch
+            OAuthToken: !Ref GitHubOAuthToken
+            PollForSourceChanges: false
+          OutputArtifacts:
+          - Name: "GIT_SOURCE_FILES"
+          RunOrder: 1
+      - Name: "Deploy"
+        Actions:
+        - Name: "Infrastructure_CodePipeline"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "CloudFormation"
+            Version: "1"
+          Configuration:
+            ActionMode: !Ref ActionMode
+            StackName: !Sub "${InfrastructureName}-codepipeline-infrastructure-setup"
+            Capabilities: !Ref CloudFormationCapabilities
+            TemplatePath:
+              Fn::Sub:
+              - "GIT_SOURCE_FILES::${Folder}iac/cfn/codepipeline/infrastructure.yaml"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            TemplateConfiguration:
+              Fn::Sub:
+              - "GIT_SOURCE_FILES::${Folder}env/cfn/codepipeline/infrastructure/${TagEnvironment}.json"
+              - Folder: !If [ AppBaseFolder, !Sub "${AppBaseFolder}/", "" ]
+            RoleArn: !GetAtt SetupServiceRole.Arn
+            OutputFileName: "out.json"
+            ParameterOverrides: !Sub |
+              {
+                "ActionMode": "${ActionMode}",
+                "CreateDomainNameHostedZone": "${CreateDomainNameHostedZone}",
+                "HostedZoneDomainName": "${HostedZoneDomainName}",
+                "NonProdNameServerDomains": "${NonProdNameServerDomains}",
+                "NonProdDomainName": "${NonProdDomainName}",
+                "CreateGitHubSourceCredential": "${CreateGitHubSourceCredential}",
+                "CreateSecureCertificate": "${CreateSecureCertificate}",
+                "SecureCertificatePrimaryDomain": "${SecureCertificatePrimaryDomain}",
+                "SecureCertificateAlternateDomainCount": "${SecureCertificateAlternateDomainCount}",
+                "SecureCertificateAlternateDomains": "${SecureCertificateAlternateDomains}",
+                "RegionUse": "${RegionUse}",
+                "VpnIpv4CidrBlock": "${VpnIpv4CidrBlock}",
+                "CreateBastion": "${CreateBastion}",
+                "KeyPair": "${KeyPair}",
+                "EnableVpcIpv6": "${EnableVpcIpv6}",
+                "ExternalAccountId": "${ExternalAccountId}",
+                "InfrastructureName": "${InfrastructureName}",
+                "SourceObject": "${DeploymentObjectKey}"
+              }
+          InputArtifacts:
+          - Name: "GIT_SOURCE_FILES"
+          OutputArtifacts:
+          - Name: "INFRASTRUCTURE_OUTPUT"
+          RunOrder: 1
+          Region: !Ref "AWS::Region"
+        - Name: "Infrastructure_Templates"
+          ActionTypeId:
+            Category: "Deploy"
+            Owner: "AWS"
+            Provider: "S3"
+            Version: "1"
+          Configuration:
+            BucketName: !Ref SetupBucket
+            Extract: false
+            ObjectKey: !Ref DeploymentObjectKey
+          InputArtifacts:
+          - Name: "GIT_SOURCE_FILES"
+          RunOrder: 2
+          Region: !Ref "AWS::Region"
+      Tags:
+      - Key: "Name"
+        Value: !Ref "AWS::StackName"
+      - Key: "application"
+        Value: !Ref "AWS::StackName"
+      - Key: "contact-email"
+        Value: !Ref TagEmailAddress
+      - Key: "customer"
+        Value: !Ref TagCustomer
+      - Key: "environment"
+        Value: !Ref TagEnvironment
+      - Key: "team"
+        Value: !Ref TagTeam
+  GitHubWebhook:
+    Type: "AWS::CodePipeline::Webhook"
+    DependsOn: SetupCodePipeline
+    Properties:
+      Authentication: "GITHUB_HMAC"
+      AuthenticationConfiguration:
+        # Grabbing the UUID from the stack ID since it is random and nobody would know it unless you logged into the account.
+        SecretToken: !Select [ 2, !Split [ "/", !Ref "AWS::StackId" ] ]
+      Filters:
+      - JsonPath: "$.ref"
+        MatchEquals: "refs/heads/{Branch}"
+      TargetPipeline: !Ref SetupCodePipeline
+      TargetAction: "GitHub_Source"
+      Name: !Ref SetupCodePipeline
+      TargetPipelineVersion: !GetAtt SetupCodePipeline.Version
+      RegisterWithThirdParty: true
+Outputs:
+  SuggestedStackName:
+    Description: "The suggested stack name for this template."
+    Value: !Ref SuggestedStackName
+    Export:
+      Name: !Sub "${AWS::StackName}-SuggestedStackName"
+  AwsAccountName:
+    Description: "The suggested stack name for this template."
+    Value: !Ref AwsAccountName
+    Export:
+      Name: !Sub "${AWS::StackName}-AwsAccountName"
+  InfrastructureKeyArn:
+    Description: "The ARN of the infrastructure key."
+    Value: !GetAtt InfrastructureKey.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureKeyArn"
+  InfrastructureKeyId:
+    Description: "The ID of the infrastructure key."
+    Value: !GetAtt InfrastructureKey.KeyId
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureKeyId"
+  InfrastructureKeyAliasName:
+    Description: "The name of the infrastructure key alias."
+    Value: !Ref InfrastructureKeyAlias
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureKeyAliasName"
+  ParamAwsAccountId:
+    Description: "The AWS Account ID SSM parameter."
+    Value: !Ref ParamAwsAccountId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamAwsAccountId"
+  ParamAwsAccountName:
+    Description: "The AWS Account name SSM parameter."
+    Value: !Ref ParamAwsAccountName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamAwsAccountName"
+  ParamAwsAccountRegion:
+    Description: "The AWS Account region SSM parameter."
+    Value: !Ref ParamAwsAccountRegion
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamAwsAccountRegion"
+  ParamExternalAccountId:
+    Description: "The external AWS account ID SSM parameter."
+    Value: !Ref ParamExternalAccountId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamExternalAccountId"
+  ParamAllowedCidrBlocks:
+    Description: "A sting of allowed CIDR blocks for this infrastructure (mixed IPv4 and IPv6) SSM parameter."
+    Value: !Ref ParamAllowedCidrBlocks
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamAllowedCidrBlocks"
+  ParamAllowedCidrBlockList:
+    Description: "A list of allowed CIDR blocks for this infrastructure (mixed IPv4 and IPv6) SSM parameter."
+    Value: !Ref ParamAllowedCidrBlockList
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamAllowedCidrBlockList"
+  ParamHostedZoneDomainName:
+    Description: "The hosted zone domain name SSM parameter."
+    Value: !Ref ParamHostedZoneDomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamHostedZoneDomainName"
+  ParamExistingHostedZoneId:
+    Condition: ExistingDomainNameHostedZone
+    Description: "The existing hosted zone ID SSM parameter."
+    Value: !Ref ParamExistingHostedZoneId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamExistingHostedZoneId"
+  ParamExistingSecureCertificateArn:
+    Condition: ExistingSecureCertificateArn
+    Description: "The existing secure certificate ARN SSM parameter."
+    Value: !Ref ParamExistingSecureCertificateArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamExistingSecureCertificateArn"
+  ParamGitHubServiceAccountName:
+    Description: "The GitHub service account name SSM parameter."
+    Value: !Ref ParamGitHubServiceAccountName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamGitHubServiceAccountName"
+  ParamGitHubServiceAccountId:
+    Description: "The GitHub service account ID SSM parameter."
+    Value: !Ref ParamGitHubServiceAccountId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamGitHubServiceAccountId"
+  ParamInfrastructureKmsKeyArn:
+    Description: "The infrastructure KMS Key ARN SSM parameter."
+    Value: !Ref ParamInfrastructureKmsKeyArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInfrastructureKmsKeyArn"
+  ParamInfrastructureKmsKeyId:
+    Description: "The infrastructure KMS Key ID SSM parameter."
+    Value: !Ref ParamInfrastructureKmsKeyId
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInfrastructureKmsKeyId"
+  ParamInfrastructureKeyAliasName:
+    Description: "The infrastructure KMS Key Alias SSM parameter."
+    Value: !Ref ParamInfrastructureKeyAliasName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamInfrastructureKeyAliasName"
+  ParamSetupBucketName:
+    Description: "The setup bucket name SSM parameter."
+    Value: !Ref ParamSetupBucketName
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamSetupBucketName"
+  ParamSetupBucketArn:
+    Description: "The setup bucket ARN SSM parameter."
+    Value: !Ref ParamSetupBucketArn
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamSetupBucketArn"
+  ParamTagContactEmailName:
+    Description: "The name of the SSM e-mail parameter."
+    Value: !Ref ParamTagContactEmail
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagContactEmailName"
+  ParamTagCustomerName:
+    Description: "The name of the SSM customer parameter."
+    Value: !Ref ParamTagCustomer
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagCustomerName"
+  ParamTagEnvironmentName:
+    Description: "The name of the SSM environment parameter."
+    Value: !Ref ParamTagEnvironment
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagEnvironmentName"
+  ParamTagTeamName:
+    Description: "The name of the SSM team parameter."
+    Value: !Ref ParamTagTeam
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagTeamName"
+  ParamTagContactEmailType:
+    Description: "The type of the SSM e-mail parameter."
+    Value: !GetAtt ParamTagContactEmail.Type
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagContactEmailType"
+  ParamTagCustomerType:
+    Description: "The type of the SSM customer parameter."
+    Value: !GetAtt ParamTagCustomer.Type
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagCustomerType"
+  ParamTagEnvironmentType:
+    Description: "The type of the SSM environment parameter."
+    Value: !GetAtt ParamTagEnvironment.Type
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagEnvironmentType"
+  ParamTagTeamType:
+    Description: "The type of the SSM team parameter."
+    Value: !GetAtt ParamTagTeam.Type
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagTeamType"
+  ParamTagContactEmailValue:
+    Description: "The value of the SSM e-mail parameter."
+    Value: !GetAtt ParamTagContactEmail.Value
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagContactEmailValue"
+  ParamTagCustomerValue:
+    Description: "The value of the SSM customer parameter."
+    Value: !GetAtt ParamTagCustomer.Value
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagCustomerValue"
+  ParamTagEnvironmentValue:
+    Description: "The value of the SSM environment parameter."
+    Value: !GetAtt ParamTagEnvironment.Value
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagEnvironmentValue"
+  ParamTagTeamValue:
+    Description: "The value of the SSM team parameter."
+    Value: !GetAtt ParamTagTeam.Value
+    Export:
+      Name: !Sub "${AWS::StackName}-ParamTagTeamValue"
+  AccountSecretArn:
+    Description: "The ARN of the account information secret."
+    Value: !Ref AccountSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-AccountSecretArn"
+  GitHubSecretArn:
+    Description: "The ARN of the GitHub secret."
+    Value: !Ref GitHubSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-GitHubSecretArn"
+  DockerHubSecretArn:
+    Description: "The ARN of the DockerHub secret."
+    Value: !Ref DockerHubSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-DockerHubSecretArn"
+  InfrastructureSecretArn:
+    Description: "The ARN of the infrastructure secret."
+    Value: !Ref InfrastructureSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-InfrastructureSecretArn"
+  TagsSecretArn:
+    Description: "The ARN of the tags secret."
+    Value: !Ref TagsSecret
+    Export:
+      Name: !Sub "${AWS::StackName}-TagsSecretArn"
+  SetupBucketName:
+    Description: "The name of the setup bucket."
+    Value: !Ref SetupBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupBucketName"
+  SetupBucketArn:
+    Description: "The ARN of the setup bucket."
+    Value: !GetAtt SetupBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupBucketArn"
+  SetupBucketDomainName:
+    Description: "The domain name of the setup bucket."
+    Value: !GetAtt SetupBucket.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupBucketDomainName"
+  SetupBucketDualStackDomainName:
+    Description: "The dual stack domain name of the setup bucket."
+    Value: !GetAtt SetupBucket.DualStackDomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupBucketDualStackDomainName"
+  SetupBucketRegionalDomainName:
+    Description: "The regional domain name of the setup bucket."
+    Value: !GetAtt SetupBucket.RegionalDomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupBucketRegionalDomainName"
+  SetupBucketWebsiteUrl:
+    Description: "The URL of the setup bucket."
+    Value: !GetAtt SetupBucket.WebsiteURL
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupBucketWebsiteUrl"
+  SetupServiceRoleArn:
+    Description: "The ARN of the setup service role."
+    Value: !GetAtt SetupServiceRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupServiceRoleArn"
+  SetupServiceRoleId:
+    Description: "The ID of the setup service role."
+    Value: !GetAtt SetupServiceRole.RoleId
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupServiceRoleId"
+  SetupServiceRoleName:
+    Description: "The name of the setup service role."
+    Value: !Ref SetupServiceRole
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupServiceRoleName"
+  SetupCodePipelineName:
+    Description: "The name of the setup CodePipeline."
+    Value: !Ref SetupCodePipeline
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupCodePipelineName"
+  SetupCodePipelineVersion:
+    Description: "The version of the setup CodePipeline."
+    Value: !GetAtt SetupCodePipeline.Version
+    Export:
+      Name: !Sub "${AWS::StackName}-SetupCodePipelineVersion"
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "General Configuration"
+      Parameters:
+      - SuggestedStackName
+      - InfrastructureName
+      - AwsAccountName
+      - ExternalAccountId
+    - Label:
+        default: "Bucket Configuration"
+      Parameters:
+      - BucketObjectExpirationInDays
+      - DeploymentObjectKey      
+    - Label:
+        default: "CodePipeline Configuration"
+      Parameters:
+      - CloudFormationCapabilities
+      - AppBaseFolder
+      - ActionMode
+    - Label:
+        default: "Domain Configuration"
+      Parameters:
+      - CreateDomainNameHostedZone
+      - HostedZoneDomainName
+      - ExistingHostedZoneId
+      - NonProdNameServerDomains
+      - NonProdDomainName
+    - Label:
+        default: "Secure Certificate Configuration"
+      Parameters:
+      - CreateSecureCertificate
+      - SecureCertificatePrimaryDomain
+      - SecureCertificateAlternateDomainCount
+      - SecureCertificateAlternateDomains
+      - ExistingSecureCertificateArn
+    - Label:
+        default: "VPC Configuration"
+      Parameters:
+      - RegionUse
+      - VpnIpv4CidrBlock
+      - AllowedCidrBlockList
+      - CreateBastion
+      - KeyPair
+      - EnableVpcIpv6
+    - Label:
+        default: "Source Configuration"
+      Parameters:
+      - CodePipelineGitHubOrganization
+      - CodePipelineSourceRepository
+      - CodePipelineSourceBranch
+    - Label:
+        default: "GitHub Configuration"
+      Parameters:
+      - GitHubOAuthToken
+      - GitHubServiceAccountName
+      - GitHubServiceAccountId
+      - CreateGitHubSourceCredential
+    - Label:
+        default: "DockerHub Configuration"
+      Parameters:
+      - DockerHubUsername
+      - DockerHubToken
+    - Label:
+        default: "KMS Key Configuration"
+      Parameters:
+      - KeyEnabled
+      - EnableKeyRotation
+    - Label:
+        default: "Tags Configuration"
+      Parameters:
+      - TagCustomer
+      - TagEmailAddress
+      - TagEnvironment
+      - TagTeam
+    ParameterLabels:
+      # General Configuration
+      SuggestedStackName:
+        default: "Suggested Stack Name:"
+      InfrastructureName:
+        default: "Infrastructure Name:"
+      AwsAccountName:
+        default: "AWS Account Name:"
+      ExternalAccountId:
+        default: "External Account ID:"
+      # Bucket Configuration
+      BucketObjectExpirationInDays:
+        default: "Bucket Object Expiration in Days:"
+      DeploymentObjectKey:
+        default: "Deployment Object Key:"
+      # CodePipeline Configuration
+      CloudFormationCapabilities:
+        default: "CloudFormation Capabilities:"
+      AppBaseFolder:
+        default: "Application Base Folder:"
+      ActionMode:
+        default: "Action Mode:"
+      # Domain Configuration
+      CreateDomainNameHostedZone:
+        default: "Create Hosted Zone:"
+      HostedZoneDomainName:
+        default: "Hosted Zone Domain Name:"
+      ExistingHostedZoneId:
+        default: "Existing Hosted Zone ID:"
+      NonProdNameServerDomains:
+        default: "Non-Prod Name Server Domains:"
+      NonProdDomainName:
+        default: "Non-Prod Domain Name:"
+      # Secure Certificate Configuration
+      CreateSecureCertificate:
+        default: "Create Secure Certificate:"
+      SecureCertificatePrimaryDomain:
+        default: "Secure Certificate Primary Domain:"
+      SecureCertificateAlternateDomainCount:
+        default: "Secure Certificate Alternate Domain Count:"
+      SecureCertificateAlternateDomains:
+        default: "Secure Certificate Alternate Domains:"
+      ExistingSecureCertificateArn:
+        default: "Existing Secure Certificate ARN:"
+      # VPC Configuration
+      RegionUse:
+        default: "Region Use:"
+      VpnIpv4CidrBlock:
+        default: "VPN IPv4 CIDR Block:"
+      AllowedCidrBlockList:
+        default: "Allowed CIDR Block List:"
+      CreateBastion:
+        default: "Create Bastion:"
+      KeyPair:
+        default: "EC2 Key Pair:"
+      EnableVpcIpv6:
+        default: "Enable VPC IPv6:"
+      # Source Configuration
+      CodePipelineGitHubOrganization:
+        default: "CodePipeline GitHub Organization:"
+      CodePipelineSourceRepository:
+        default: "CodePipeline Source Repository:"
+      CodePipelineSourceBranch:
+        default: "CodePipeline Source Branch:"
+      # GitHub Configuration
+      GitHubOAuthToken:
+        default: "GitHub OAuth Token:"
+      GitHubServiceAccountName:
+        default: "GitHub Service Account Name:"
+      GitHubServiceAccountId:
+        default: "GitHub Service Account ID:"
+      CreateGitHubSourceCredential:
+        default: "Create GitHub Source Credential:"
+      # DockerHub Configuration
+      DockerHubUsername:
+        default: "DockerHub Username:"
+      DockerHubToken:
+        default: "DockerHub Token:"
+      # KMS Key Configuration
+      KeyEnabled:
+        default: "Key Enabled:"
+      EnableKeyRotation:
+        default: "Enable Key Rotation:"
+      # Tags Configuration
+      TagCustomer:
+        default: "Customer:"
+      TagEmailAddress:
+        default: "E-mail Address:"
+      TagEnvironment:
+        default: "Environment:"
+      TagTeam:
+        default: "Team:"
